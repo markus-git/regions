@@ -128,16 +128,20 @@ type family Result a where
 data (sym :&: info) a where
     (:&:) :: sym a -> info (Result a) -> (sym :&: info) a
 
--- | Representation of supported types.
-class Eq a => Primitive a where
-    data Rep a :: *
-    typeRep :: Rep a
+--------------------------------------------------------------------------------
+-- * Region labelling
+--------------------------------------------------------------------------------
 
 -- | Region names.
 type Region = Name
 
 -- | Signature of a symbol labelled with regions.
-data Labeling a = Value (Rep a) | Function (Labeling a) Region (Labeling a)
+data Labeling a = Value a Region | Function (Labeling a) Region (Labeling a)
+
+-- | Representation of supported types.
+class Eq a => Primitive a where
+    data Rep a :: *
+    typeRep :: Rep a
 
 --------------------------------------------------------------------------------
 -- * Region annotation.
