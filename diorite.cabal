@@ -1,0 +1,40 @@
+name:                Diorite
+version:             0.1.0.0
+synopsis:            A generic representation of type-indexed abstract syntax trees with a region-based memory management scheme.
+-- description:
+license:             BSD3
+license-file:        LICENSE
+author:              Markus Aronsson
+maintainer:          mararon@chalmers.se
+homepage:            github.com/markus-git/regions
+bug-reports:         github.com/markus-git/regions/issues
+copyright:           Copyright (c) 2020, the respective contributors, as shown by the AUTHORS file.
+Stability:           Experimental
+category:            Language
+build-type:          Simple
+extra-source-files:  AUTHORS
+cabal-version:       >=1.10
+
+library
+  exposed-modules:
+    Language.Diorite
+  -- other-modules:
+  build-depends:
+    base >=4.11 && <4.12,
+    -- constraints < 0.11,
+    containers < 0.7,
+    mtl >= 2 && < 2.3
+  hs-source-dirs:    src
+  default-language:  Haskell2010
+  default-extensions:
+    GADTs
+    DataKinds
+    PolyKinds
+    KindSignatures
+    TypeFamilies
+    TypeOperators
+    FlexibleInstances
+    FlexibleContexts
+    RankNTypes
+    ScopedTypeVariables
+    
