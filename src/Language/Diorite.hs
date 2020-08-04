@@ -10,8 +10,8 @@ module Language.Diorite where
 import Data.Typeable (Typeable)
 
 --import Data.List (intersperse)
-import Data.IntMap (IntMap)
-import qualified Data.IntMap as Map (lookup,union,map,fromList)
+--import Data.IntMap (IntMap)
+--import qualified Data.IntMap as Map (lookup,union,map,fromList)
 
 --import Control.Arrow (first)
 import Control.Monad.State (State)
@@ -21,10 +21,13 @@ import qualified Control.Monad.State as S
 -- * Abstract syntax tree.
 --------------------------------------------------------------------------------
 
--- | Signature of a symbol.
-data Signature a = Const a | Signature a :-> Signature a
+-- | \"Put\" predicate, asserts that a region is allocated.
+data Put = Put
 
-infixr :->
+-- | Signature of a symbol.
+data Signature a = Const a | Signature a :-> Signature a | Put :=> Signature a
+
+infixr :->, :=>
 
 -- | Variable names.
 type Name = Int
@@ -37,14 +40,12 @@ data Beta sym (sig :: Signature *) where
     Var  :: Name -> Beta sym sig
     Sym  :: sym sig -> Beta sym sig
     (:$) :: Beta sym (sig ':-> a) -> Eta sym sig -> Beta sym a
-    -- ^ Place application.
-    (:#) :: Beta sym sig -> Place -> Beta sym sig
+    (:#) :: Beta sym ('Put ':=> sig) -> Place -> Beta sym sig
 
 data Eta sym (sig :: Signature *) where
     Lam   :: Name -> Eta sym a -> Eta sym (sig ':-> a)
+    ELam  :: Place -> Eta sym sig -> Eta sym ('Put ':=> sig)
     Spine :: Beta sym ('Const sig) -> Eta sym ('Const sig)
-    -- ^ Place abstraction.
-    ELam  :: Place -> Eta sym sig -> Eta sym sig
 
 infixl 1 :$, :#
 
@@ -78,7 +79,6 @@ resugar = sugar . tail' . desugar
   where
     tail' :: Eta (Domain a) ('Const a) -> Beta (Domain a) ('Const a)
     tail' (Spine b)  = b
-    tail' (ELam _ e) = tail' e
 
 instance Syntactic (Beta sym ('Const a)) where
     type Domain   (Beta sym ('Const a)) = sym
@@ -92,14 +92,16 @@ instance Syntactic (Eta sym ('Const a)) where
     sugar   = Spine
     desugar = id
 
--- | Get the highest name bound.
+-- | Get the highest name bound for \"Eta\" node.
 maxLamEta :: Eta sym a -> Name
 maxLamEta (Lam n _)   = n
+maxLamEta (ELam _ e)  = maxLamEta e
 maxLamEta (Spine b)   = maxLamBeta b
-maxLamEta _           = 0
 
+-- | Get the highest name bound for \"Beta\" node.
 maxLamBeta :: Beta sym b -> Name
-maxLamBeta (s :$ a) = maxLamBeta s `Prelude.max` maxLamEta a
+maxLamBeta (b :$ e) = maxLamBeta b `Prelude.max` maxLamEta e
+maxLamBeta (b :# _) = maxLamBeta b
 maxLamBeta _        = 0
 
 -- | Interface for variable binding.
@@ -160,8 +162,7 @@ instance Render sym => Show (ASTF sym a) where
 --------------------------------------------------------------------------------
 
 -- | Denotational result of a symbol's signature.
-type family Result a
-  where
+type family Result a where
     Result ('Const a) = a
     Result (a ':-> b) = Result b
 
@@ -177,49 +178,18 @@ instance Render sym => Render (sym :&: info) where
     renderArgs args = renderArgs args . decor_sym
 
 --------------------------------------------------------------------------------
--- ** ...
+-- ** Type casting (todo).
 --------------------------------------------------------------------------------
 
--- | Labelling of primitive types.
-class (Eq a, Show a, Typeable a) => Label a where
-    -- ^ Representation of a region-annotated type.
-    data Type a :: *
-    -- ^ Reify and label a type.
-    represent :: Type a
+-- \"Typed\" symbol.
+data Typed sym sig where
+    Typed :: Typeable (Result sig) => sym sig -> Typed sym sig
 
--- | Region name, associated with one or more places.
-type Region = Name
-
--- | Witness of a symbol signature.
-data SigRep a where
-    RConst   :: Type a -> SigRep ('Const a)
-    RPartial :: Region -> SigRep a -> SigRep sig -> SigRep (a ':-> sig)
-
--- | ...
-class LabelSig sig where
-    signature :: SigRep sig
-
-instance Label a => LabelSig ('Const a) where
-    signature = RConst represent
-
-instance (LabelSig a, LabelSig sig) => LabelSig (a ':-> sig) where
-    signature = RPartial undefined signature signature
-
--- | ...
-class LabelSym sym where
-    symbol :: sym sig -> SigRep sig
-
--- | A \"Put\" predicate that asserts a region is allocated.
-data Put = Put Region
-
--- | A \"Place\" (evidence) associated with a \"Put\" predicate.
-type Qualifier = (Place,Put)
-
--- | ...
-data QualType a = QType (SigRep a) | Qualifier :=> QualType a
+instance Render sym => Render (Typed sym) where
+    renderSym (Typed s) = renderSym s
 
 --------------------------------------------------------------------------------
--- * Region inference.
+-- ** Local regions.
 --------------------------------------------------------------------------------
 
 -- | Local region-bindings and region-annotations.
@@ -229,15 +199,55 @@ data Local sig where
 instance Render Local where
     renderSym (Local p) = "Letregion " ++ show p ++ " in "
 
--- | ...
-data Typed sym sig where
-    Typed :: Typeable (Result sig) => sym sig -> Typed sym sig
-
-instance Render sym => Render (Typed sym) where
-    renderSym (Typed s) = renderSym s
-
 --------------------------------------------------------------------------------
 
+
+--------------------------------------------------------------------------------
+-- ** Type/Signature witness.
+--------------------------------------------------------------------------------
+
+-- | Labelling of primitive types.
+class (Eq a, Show a, Typeable a) => Prim a
+--    data Type a :: *
+--    represent :: Type a
+
+-- | Name of a region, associated with one or more places.
+type Region = Name
+
+-- | Witness of a symbol signature.
+data SigRep a where
+    SigConst :: SigRep ('Const a)
+    SigPart  :: Region -> SigRep sig -> SigRep (a ':-> sig)
+    SigPred  :: Region -> SigRep sig -> SigRep ('Put ':=> sig)
+
+-- | Valid symbol signatures.
+class Sig sig where
+    represent :: SigRep sig
+
+instance Sig ('Const a) where
+    represent = SigConst
+
+instance Sig sig => Sig (a ':-> sig) where
+    represent = SigPart 0 represent
+
+instance Sig sig => Sig ('Put ':=> sig) where
+    represent = SigPred 0 represent
+
+-- | Symbol with a valid signature.
+class Sym sym where
+    symbol :: sym sig -> SigRep sig
+
+--------------------------------------------------------------------------------
+-- * Region inference.
+--------------------------------------------------------------------------------
+
+-- | A \"Place\" associated with the region of a \"Put\" predicate.
+type Pred = (Place,Region)
+
+instantiateSym :: sym sig -> (sym) sig
+instantiateSym _ = undefined
+
+{-
 -- | ...
 type Env sym = IntMap ([Place],E QualType)
 
@@ -264,7 +274,7 @@ instantiate env b@(Var v) = case Map.lookup v env of
         let s = newSub (zip ps ps')
         return (s, undefined, foldr (flip (:#)) b ps')
 instantiate _ _ = error "Instantiate not called on variable."
-
+-}
 --------------------------------------------------------------------------------
 
 -- compareSignature :: QualType sig a -> 
@@ -288,7 +298,7 @@ newNames :: (Enum a, Num a) => a -> M [Name]
 newNames n = mapM (const newName) [1..n]
 
 --------------------------------------------------------------------------------
-
+{-
 -- | Region-substitution.
 type Subst = IntMap Region
 
@@ -303,22 +313,22 @@ newSub = Map.fromList
     update r = case Map.lookup r a of
       Nothing -> r
       Just r' -> r'
-
+-}
 --------------------------------------------------------------------------------
-
+{-
 -- | Existential quantification.
 data E e where
     E :: e a -> E e
 
 liftE :: (forall a . e a -> b) -> E e -> b
 liftE f (E a) = f a
-
+-}
 --------------------------------------------------------------------------------
-
+{-
 -- | ...
 data P e a where
     P :: e -> P e a
-
+-}
 --------------------------------------------------------------------------------
 -- * Example.
 --------------------------------------------------------------------------------
@@ -338,13 +348,13 @@ test_let =
       :$ (Lam 0 (Spine (Var 0)))
 
 --------------------------------------------------------------------------------
-
+{-
 annotated_let :: ASTF SExp Int
 annotated_let =
     (Sym Let)
       :$ (ELam 4 (Spine (Sym (Int 1))))
       :$ (ELam 4 (Lam 0 (Spine ((Var 0) :# 4))))
-
+-}
 --------------------------------------------------------------------------------
 -- Old Code.
 --------------------------------------------------------------------------------
