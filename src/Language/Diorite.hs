@@ -10,8 +10,8 @@ module Language.Diorite where
 import Data.Typeable (Typeable)
 
 --import Data.List (intersperse)
---import Data.IntMap (IntMap)
---import qualified Data.IntMap as Map (lookup,union,map,fromList)
+import Data.IntMap (IntMap)
+import qualified Data.IntMap as Map (lookup,union,map,fromList)
 
 --import Control.Arrow (first)
 import Control.Monad.State (State)
@@ -158,9 +158,16 @@ instance Render sym => Show (Beta sym a) where
 instance Render sym => Show (Eta sym a) where
     show = renderEta
 
--- | Render an 'ASTF' as concrete syntax.
-render :: Render sym => ASTF sym a -> String
-render = renderBeta []
+--------------------------------------------------------------------------------
+-- ** Evaluation.
+--------------------------------------------------------------------------------
+
+-- | Denotational result of a symbol's signature.
+type family Result sig where
+    Result ('Const a) = a
+    Result (a ':-> b) = Result b
+
+-- todo.
 
 --------------------------------------------------------------------------------
 -- ** Type/Signature witness.
@@ -198,19 +205,16 @@ class Sym sym where
     symbol :: sym sig -> SigRep sig
 
 --------------------------------------------------------------------------------
--- ** Decoration.
+-- ** Extensions.
 --------------------------------------------------------------------------------
 
--- | Denotational result of a symbol's signature.
-type family Result sig where
-    Result ('Const a) = a
-    Result (a ':-> b) = Result b
+--------------------------------------------------------------------------------
+-- *** Decoration.
 
 -- | Decorated symbol.
 data (sym :&: info) sig where
     (:&:) :: { decor_sym  :: sym sig
-             , decor_info :: info (Result sig)
-             }
+             , decor_info :: info sig }
           -> (sym :&: info) sig
 
 instance Render sym => Render (sym :&: info) where
@@ -247,32 +251,34 @@ type family Erasure a where
     Erasure (a ':-> b)    = Erasure a ':-> Erasure b
     Erasure ('Put ':=> a) = Erasure a
 
--- | ...
-class Infer source target where
-    inferSym :: (sig ~ Erasure sig') => source sig -> Beta target sig'
+-- class Infer s t where inferSym :: (sig ~ Erasure sig') => s sig -> Beta t sig'
 
 --------------------------------------------------------------------------------
 
--- | A \"Place\" associated with the region of a \"Put\" predicate.
-type Pred = (Place,Region)
+-- | Context consists of a list of \"Place\"'s associated with the region of a
+--   \"Put\" predicate.
+type P = [(Place,Region)]
 
--- | ...
-inferBeta :: Infer source target => Beta source sig -> M (Beta target sig)
+-- | Variable assignments consists of ...
+type A sym = IntMap (Ex (sym :&: SigRep))
+
+inferBeta :: (sig ~ Erasure sig') => Beta s sig -> M (P,A t,S,Beta t sig')
 inferBeta (Var _)  = undefined
 inferBeta (Sym _)  = undefined
 inferBeta (_ :$ _) = undefined
-inferBeta (_ :# _) = error "inferred."
+inferBeta _ = error "Already inferred."
+
+inferEta :: (sig ~ Erasure sig') => Eta s sig -> M (P,A t,S,Eta t sig')
+inferEta (Lam _ _)  = undefined
+inferEta (Spine _)  = undefined
+inferEta _ = error "Already inferred."
+
+--------------------------------------------------------------------------------
+
+inferSym :: (sig ~ Erasure sig') => s sig -> M (P,A t,S,Beta t sig')
+inferSym = undefined
 
 {-
--- | ...
-type Env sym = IntMap ([Place],E QualType)
-
-inferEta :: Env sym -> Eta sym sig -> M (Eta sym sig)
-inferEta _   (Lam _ _)  = undefined
-inferEta _   (Spine _)  = undefined
-inferEta _   (ELam _ _) = error "inferred."
-
--- | ...
 instantiate :: forall sym sig
     .  Env sym
     -> Beta sym sig
@@ -303,37 +309,31 @@ newNames :: (Enum a, Num a) => a -> M [Name]
 newNames n = mapM (const newName) [1..n]
 
 --------------------------------------------------------------------------------
-{-
--- | Region-substitution.
-type Subst = IntMap Region
 
-newSub :: [(Place,Place)] -> Subst
+-- | Region-substitution.
+type S = IntMap Region
+
+newSub :: [(Place,Name)] -> S
 newSub = Map.fromList
 
 -- | Left-biased union of two substitutions.
-(@@) :: Subst -> Subst -> Subst
+(@@) :: S -> S -> S
 (@@) a b = Map.union a (Map.map update b)
   where
     update :: Region -> Region
     update r = case Map.lookup r a of
       Nothing -> r
       Just r' -> r'
--}
---------------------------------------------------------------------------------
-{-
--- | Existential quantification.
-data E e where
-    E :: e a -> E e
 
-liftE :: (forall a . e a -> b) -> E e -> b
-liftE f (E a) = f a
--}
 --------------------------------------------------------------------------------
-{-
--- | ...
-data P e a where
-    P :: e -> P e a
--}
+
+-- | Existential quantification.
+data Ex e where
+    Ex :: e a -> Ex e
+
+liftE :: (forall a . e a -> b) -> Ex e -> b
+liftE f (Ex a) = f a
+
 --------------------------------------------------------------------------------
 -- * Example.
 --------------------------------------------------------------------------------
@@ -363,15 +363,28 @@ instance Render TExp where
 
 --------------------------------------------------------------------------------
 
+conv_sexp :: SExp a -> M (Beta TExp a)
+conv_sexp (SInt i) = do
+    p <- newName
+    return (Sym (TInt i) :# p)
+
+--------------------------------------------------------------------------------
+
 test_add :: Eta SExp ('Const Int ':-> 'Const Int)
 test_add =
     (Lam 1
       (Spine ((Sym SAdd)
-          :$ (Spine (Sym (SInt 0)))
-          :$ (Spine (Var 1)))))
+        :$ (Spine (Sym (SInt 0)))
+        :$ (Spine (Var 1)))))
 
-test_add' :: Beta TExp ('Const Int)
-test_add' = undefined
+test_add' :: Eta TExp ('Put ':=> 'Const Int ':-> 'Const Int)
+test_add' =
+    (ELam 2 (Lam 1
+      (Spine ((Sym (TLocal 3))
+        :$ (Spine ((Sym TAdd)
+             :# 2
+             :$ (Spine ((Sym (TInt 0)) :# 3))
+             :$ (Spine (Var 1))))))))
 
 --------------------------------------------------------------------------------
 -- Old Code.
