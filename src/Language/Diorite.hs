@@ -78,7 +78,7 @@ resugar ::
 resugar = sugar . tail' . desugar
   where
     tail' :: Eta (Domain a) ('Const a) -> Beta (Domain a) ('Const a)
-    tail' (Spine b)  = b
+    tail' (Spine b) = b
 
 instance Syntactic (Beta sym ('Const a)) where
     type Domain   (Beta sym ('Const a)) = sym
@@ -139,23 +139,28 @@ class Render sym where
     renderArgs []   s = renderSym s
     renderArgs args s = "(" ++ unwords (renderSym s : args) ++ ")"
 
+-- | Render a \"Beta\" tree as concrete syntax.
+renderBeta :: Render sym => [String] -> Beta sym a -> String
+renderBeta _    (Var n)  = show n
+renderBeta args (Sym s)  = renderArgs args s
+renderBeta args (s :$ e) = renderBeta (renderEta e : args) s
+renderBeta args (s :# p) = renderBeta (("<" ++ show p ++ ">") : args) s
+
+-- | Render an \"Eta\" spine as concrete syntax.
+renderEta :: Render sym => Eta sym a -> String
+renderEta (Lam n e)  = "(\\" ++ show n ++ ". " ++ renderEta e ++ ")"
+renderEta (ELam p e) = "(/\\" ++ show p ++ ". " ++ renderEta e ++ ")"
+renderEta (Spine b)  = renderBeta [] b
+
+instance Render sym => Show (Beta sym a) where
+    show = renderBeta []
+
+instance Render sym => Show (Eta sym a) where
+    show = renderEta
+
 -- | Render an 'ASTF' as concrete syntax.
 render :: Render sym => ASTF sym a -> String
-render = beta []
-  where
-    beta :: Render sym => [String] -> Beta sym a -> String
-    beta _    (Var n)    = show n
-    beta args (Sym s)    = renderArgs args s
-    beta args (s :$ e)   = beta (eta e : args) s
-    beta args (s :# p)   = beta (show p : args) s
-
-    eta :: Render sym => Eta sym a -> String
-    eta (Lam n e)  = "(\\" ++ show n ++ ". " ++ eta e ++ ")"
-    eta (Spine b)  = beta [] b
-    eta (ELam p e) = "(/\\" ++ show p ++ ". " ++ eta e ++ ")"
-
-instance Render sym => Show (ASTF sym a) where
-    show = render
+render = renderBeta []
 
 --------------------------------------------------------------------------------
 -- ** Type/Signature witness.
@@ -230,7 +235,7 @@ data Local sig where
     Local :: Place -> Local (a ':-> a)
 
 instance Render Local where
-    renderSym (Local p) = "Letregion " ++ show p ++ " in "
+    renderSym (Local p) = "local " ++ show p
 
 --------------------------------------------------------------------------------
 -- * Region inference.
@@ -336,49 +341,37 @@ data P e a where
 -- | Source language.
 data SExp a where
     SInt :: Int -> SExp ('Const Int)
-    SLet :: Name -> SExp ('Const a ':-> ('Const a ':-> 'Const b) ':-> 'Const b)
+    SAdd :: SExp ('Const Int ':-> 'Const Int ':-> 'Const Int)
 
 instance Render SExp where
     renderSym (SInt i) = "i" ++ show i
-    renderSym (SLet n) = "let " ++ show n
-
-test_let :: ASTF SExp Int
-test_let =
-    (Sym (SLet 4))
-      :$ (Spine (Sym (SInt 1)))
-      :$ (Lam 0 (Spine (Var 0)))
+    renderSym (SAdd)   = "(+)"
 
 --------------------------------------------------------------------------------
 
 -- | Target language.
 data TExp a where
-    TInt   :: Int -> TExp
-        ('Put ':=> 'Const Int)
-    TLet   :: Name -> TExp
-        ('Put ':=> ('Put ':=> 'Const a)
-              ':-> ('Const a ':-> 'Const b)
-              ':-> 'Const b)
+    TInt :: Int -> TExp ('Put ':=> 'Const Int)
+    TAdd :: TExp ('Put ':=> 'Const Int ':-> 'Const Int ':-> 'Const Int)
     -- todo: add via open symbol domains instead.
     TLocal :: Place -> TExp (a ':-> a)
 
 instance Render TExp where
-    renderSym (TInt i)   = "i" ++ show i
-    renderSym (TLet n)   = "let " ++ show n
+    renderSym (TInt i)   = renderSym (SInt i)
+    renderSym (TAdd)     = renderSym (SAdd)
     renderSym (TLocal p) = "local " ++ show p
-
-annotated_let :: ASTF TExp Int
-annotated_let =
-    (Sym (TLocal 2))
-      :$ (Spine ((Sym (TLocal 3))
-           :$ (Spine ((Sym (TLet 4))
-                :# 2
-                :$ (ELam 3 (Spine ((Sym (TInt 1)) :# 3)))
-                :$ (Lam 0 (Spine ((Var 0) :# 3)))))))
 
 --------------------------------------------------------------------------------
 
-foo :: (Erasure b ~ a) => Beta SExp a -> Beta TExp b
-foo (Sym (SInt i)) = Sym (TInt i)
+test_add :: Eta SExp ('Const Int ':-> 'Const Int)
+test_add =
+    (Lam 1
+      (Spine ((Sym SAdd)
+          :$ (Spine (Sym (SInt 0)))
+          :$ (Spine (Var 1)))))
+
+test_add' :: Beta TExp ('Const Int)
+test_add' = undefined
 
 --------------------------------------------------------------------------------
 -- Old Code.
