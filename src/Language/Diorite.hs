@@ -99,7 +99,7 @@ maxLamEta (ELam _ e)  = maxLamEta e
 maxLamEta (Spine b)   = maxLamBeta b
 
 -- | Get the highest name bound for \"Beta\" node.
-maxLamBeta :: Beta sym b -> Name
+maxLamBeta :: Beta sym a -> Name
 maxLamBeta (b :$ e) = maxLamBeta b `Prelude.max` maxLamEta e
 maxLamBeta (b :# _) = maxLamBeta b
 maxLamBeta _        = 0
@@ -143,64 +143,19 @@ class Render sym where
 render :: Render sym => ASTF sym a -> String
 render = beta []
   where
-    beta :: Render sym => [String] -> Beta sym sig -> String
+    beta :: Render sym => [String] -> Beta sym a -> String
     beta _    (Var n)    = show n
     beta args (Sym s)    = renderArgs args s
     beta args (s :$ e)   = beta (eta e : args) s
     beta args (s :# p)   = beta (show p : args) s
 
-    eta :: Render sym => Eta sym sig -> String
+    eta :: Render sym => Eta sym a -> String
     eta (Lam n e)  = "(\\" ++ show n ++ ". " ++ eta e ++ ")"
     eta (Spine b)  = beta [] b
     eta (ELam p e) = "(/\\" ++ show p ++ ". " ++ eta e ++ ")"
 
 instance Render sym => Show (ASTF sym a) where
     show = render
-
---------------------------------------------------------------------------------
--- ** Decoration.
---------------------------------------------------------------------------------
-
--- | Denotational result of a symbol's signature.
-type family Result a where
-    Result ('Const a) = a
-    Result (a ':-> b) = Result b
-
--- | Decorated symbol.
-data (sym :&: info) sig where
-    (:&:) :: { decor_sym  :: sym sig
-             , decor_info :: info (Result sig)
-             }
-          -> (sym :&: info) sig
-
-instance Render sym => Render (sym :&: info) where
-    renderSym       = renderSym . decor_sym
-    renderArgs args = renderArgs args . decor_sym
-
---------------------------------------------------------------------------------
--- ** Type casting (todo).
---------------------------------------------------------------------------------
-
--- \"Typed\" symbol.
-data Typed sym sig where
-    Typed :: Typeable (Result sig) => sym sig -> Typed sym sig
-
-instance Render sym => Render (Typed sym) where
-    renderSym (Typed s) = renderSym s
-
---------------------------------------------------------------------------------
--- ** Local regions.
---------------------------------------------------------------------------------
-
--- | Local region-bindings and region-annotations.
-data Local sig where
-    Local :: Place -> Local (a ':-> a)
-
-instance Render Local where
-    renderSym (Local p) = "Letregion " ++ show p ++ " in "
-
---------------------------------------------------------------------------------
-
 
 --------------------------------------------------------------------------------
 -- ** Type/Signature witness.
@@ -215,7 +170,7 @@ class (Eq a, Show a, Typeable a) => Prim a
 type Region = Name
 
 -- | Witness of a symbol signature.
-data SigRep a where
+data SigRep sig where
     SigConst :: SigRep ('Const a)
     SigPart  :: Region -> SigRep sig -> SigRep (a ':-> sig)
     SigPred  :: Region -> SigRep sig -> SigRep ('Put ':=> sig)
@@ -238,24 +193,74 @@ class Sym sym where
     symbol :: sym sig -> SigRep sig
 
 --------------------------------------------------------------------------------
+-- ** Decoration.
+--------------------------------------------------------------------------------
+
+-- | Denotational result of a symbol's signature.
+type family Result sig where
+    Result ('Const a) = a
+    Result (a ':-> b) = Result b
+
+-- | Decorated symbol.
+data (sym :&: info) sig where
+    (:&:) :: { decor_sym  :: sym sig
+             , decor_info :: info (Result sig)
+             }
+          -> (sym :&: info) sig
+
+instance Render sym => Render (sym :&: info) where
+    renderSym       = renderSym . decor_sym
+    renderArgs args = renderArgs args . decor_sym
+
+--------------------------------------------------------------------------------
+-- *** Type casting (todo).
+
+-- | \"Typed\" symbol.
+data Typed sym sig where
+    Typed :: Typeable (Result sig) => sym sig -> Typed sym sig
+
+instance Render sym => Render (Typed sym) where
+    renderSym (Typed s) = renderSym s
+
+--------------------------------------------------------------------------------
+-- *** Local regions.
+
+-- | Local region-bindings and region-annotations.
+data Local sig where
+    Local :: Place -> Local (a ':-> a)
+
+instance Render Local where
+    renderSym (Local p) = "Letregion " ++ show p ++ " in "
+
+--------------------------------------------------------------------------------
 -- * Region inference.
+--------------------------------------------------------------------------------
+
+-- | Erase any \"Put\" predicates in a signature.
+type family Erasure a where
+    Erasure ('Const a)    = 'Const a
+    Erasure (a ':-> b)    = Erasure a ':-> Erasure b
+    Erasure ('Put ':=> a) = Erasure a
+
+-- | ...
+class Infer source target where
+    inferSym :: (sig ~ Erasure sig') => source sig -> Beta target sig'
+
 --------------------------------------------------------------------------------
 
 -- | A \"Place\" associated with the region of a \"Put\" predicate.
 type Pred = (Place,Region)
 
-instantiateSym :: sym sig -> (sym) sig
-instantiateSym _ = undefined
+-- | ...
+inferBeta :: Infer source target => Beta source sig -> M (Beta target sig)
+inferBeta (Var _)  = undefined
+inferBeta (Sym _)  = undefined
+inferBeta (_ :$ _) = undefined
+inferBeta (_ :# _) = error "inferred."
 
 {-
 -- | ...
 type Env sym = IntMap ([Place],E QualType)
-
-inferBeta :: Env sym -> Beta sym sig -> M (Beta sym sig)
-inferBeta _   (Var _)  = undefined
-inferBeta _   (Sym _)  = undefined
-inferBeta _   (_ :$ _) = undefined
-inferBeta _   (_ :# _) = error "inferred."
 
 inferEta :: Env sym -> Eta sym sig -> M (Eta sym sig)
 inferEta _   (Lam _ _)  = undefined
@@ -275,14 +280,9 @@ instantiate env b@(Var v) = case Map.lookup v env of
         return (s, undefined, foldr (flip (:#)) b ps')
 instantiate _ _ = error "Instantiate not called on variable."
 -}
---------------------------------------------------------------------------------
-
--- compareSignature :: QualType sig a -> 
-
--- gcast :: forall a b c. (Typeable a, Typeable b) => c a -> Maybe (c b)
 
 --------------------------------------------------------------------------------
--- * Utils.
+-- ** Utils.
 --------------------------------------------------------------------------------
 
 -- | Name supply monad.
@@ -333,28 +333,53 @@ data P e a where
 -- * Example.
 --------------------------------------------------------------------------------
 
+-- | Source language.
 data SExp a where
-    Int :: Int -> SExp ('Const a)
-    Let :: SExp ('Const a ':-> ('Const a ':-> 'Const b) ':-> 'Const b)
+    SInt :: Int -> SExp ('Const Int)
+    SLet :: Name -> SExp ('Const a ':-> ('Const a ':-> 'Const b) ':-> 'Const b)
 
 instance Render SExp where
-    renderSym (Int i) = "i" ++ show i
-    renderSym (Let)   = "let"
+    renderSym (SInt i) = "i" ++ show i
+    renderSym (SLet n) = "let " ++ show n
 
 test_let :: ASTF SExp Int
 test_let =
-    (Sym Let)
-      :$ (Spine (Sym (Int 1)))
+    (Sym (SLet 4))
+      :$ (Spine (Sym (SInt 1)))
       :$ (Lam 0 (Spine (Var 0)))
 
 --------------------------------------------------------------------------------
-{-
-annotated_let :: ASTF SExp Int
+
+-- | Target language.
+data TExp a where
+    TInt   :: Int -> TExp
+        ('Put ':=> 'Const Int)
+    TLet   :: Name -> TExp
+        ('Put ':=> ('Put ':=> 'Const a)
+              ':-> ('Const a ':-> 'Const b)
+              ':-> 'Const b)
+    -- todo: add via open symbol domains instead.
+    TLocal :: Place -> TExp (a ':-> a)
+
+instance Render TExp where
+    renderSym (TInt i)   = "i" ++ show i
+    renderSym (TLet n)   = "let " ++ show n
+    renderSym (TLocal p) = "local " ++ show p
+
+annotated_let :: ASTF TExp Int
 annotated_let =
-    (Sym Let)
-      :$ (ELam 4 (Spine (Sym (Int 1))))
-      :$ (ELam 4 (Lam 0 (Spine ((Var 0) :# 4))))
--}
+    (Sym (TLocal 2))
+      :$ (Spine ((Sym (TLocal 3))
+           :$ (Spine ((Sym (TLet 4))
+                :# 2
+                :$ (ELam 3 (Spine ((Sym (TInt 1)) :# 3)))
+                :$ (Lam 0 (Spine ((Var 0) :# 3)))))))
+
+--------------------------------------------------------------------------------
+
+foo :: (Erasure b ~ a) => Beta SExp a -> Beta TExp b
+foo (Sym (SInt i)) = Sym (TInt i)
+
 --------------------------------------------------------------------------------
 -- Old Code.
 --------------------------------------------------------------------------------

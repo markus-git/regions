@@ -35,6 +35,7 @@ library
     TypeOperators
     FlexibleInstances
     FlexibleContexts
-    RankNTypes
     ScopedTypeVariables
+    RankNTypes
+    MultiParamTypeClasses
     
