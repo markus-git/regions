@@ -11,7 +11,7 @@ import Data.Typeable (Typeable)
 
 --import Data.List (intersperse)
 import Data.IntMap (IntMap)
-import qualified Data.IntMap as Map (lookup,union,map,fromList)
+import qualified Data.IntMap as Map (insert,lookup,union,map,empty,fromList)
 
 --import Control.Arrow (first)
 import Control.Monad.State (State)
@@ -162,10 +162,10 @@ instance Render sym => Show (Eta sym a) where
 -- ** Evaluation.
 --------------------------------------------------------------------------------
 
--- | Denotational result of a symbol's signature.
-type family Result sig where
-    Result ('Const a) = a
-    Result (a ':-> b) = Result b
+type family Denotation sig where
+    Denotation ('Const a)    = a
+    Denotation (a ':-> b)    = Denotation a -> Denotation b
+    -- ...
 
 -- todo.
 
@@ -174,16 +174,15 @@ type family Result sig where
 --------------------------------------------------------------------------------
 
 -- | Labelling of primitive types.
-class (Eq a, Show a, Typeable a) => Prim a
---    data Type a :: *
---    represent :: Type a
+class (Eq a, Show a, Typeable a) => Prim a where
+    primitive :: TR a
 
 -- | Name of a region, associated with one or more places.
 type Region = Name
 
 -- | Witness of a symbol signature.
 data SigRep sig where
-    SigConst :: SigRep ('Const a)
+    SigConst :: Prim a => SigRep ('Const a)
     SigPart  :: Region -> SigRep sig -> SigRep (a ':-> sig)
     SigPred  :: Region -> SigRep sig -> SigRep ('Put ':=> sig)
 
@@ -191,7 +190,7 @@ data SigRep sig where
 class Sig sig where
     represent :: SigRep sig
 
-instance Sig ('Const a) where
+instance Prim a => Sig ('Const a) where
     represent = SigConst
 
 instance Sig sig => Sig (a ':-> sig) where
@@ -205,11 +204,63 @@ class Sym sym where
     symbol :: sym sig -> SigRep sig
 
 --------------------------------------------------------------------------------
+-- ** Region inference.
+--------------------------------------------------------------------------------
+
+-- | Denotational result of a symbol's signature.
+type family Result sig where
+    Result ('Const a)    = a
+    Result (a ':-> b)    = Result b
+    Result ('Put ':=> a) = Result a
+
+-- | Erasure of any \"Put\" predicates of a symbol's signature.
+type family Erasure a where
+    Erasure ('Const a)    = 'Const a
+    Erasure (a ':-> b)    = Erasure a ':-> Erasure b
+    Erasure ('Put ':=> a) = Erasure a
+
+-- | ...
+data Arg c (sig :: Signature *) where
+    AVar   :: Name -> Arg c a -> Arg c (sig ':-> a)
+    APlace :: Place -> Arg c a -> Arg c ('Put ':=> a)
+    ASym   :: c ('Const a) -> Arg c ('Const a)
+
+-- | List of symbol arguments.
+data Args c (sig :: Signature *) where
+    Nil  :: Args c ('Const a)
+    (:*) :: Arg c a -> Args c sig -> Args c (a ':-> sig)
+    (:~) :: Place -> Args c sig -> Args c ('Put ':=> sig)
+
+infixr :*, :~
+
+-- | ...
+infer :: forall sym sym' a
+    .  (Sym sym)
+    => (forall sig . (a ~ Result sig)
+         => sym sig -> Args (Beta sym) sig -> Beta sym' ('Const a))
+    -> (forall sig . Name -> SigRep sig -> sym sig)
+    -> Beta sym ('Const a)
+    -> Beta sym' ('Const a)
+infer f g a = inferBeta a Nil
+  where
+    inferBeta :: (a ~ Result sig)
+        => Beta sym sig -> Args (Beta sym) sig -> Beta sym' ('Const a)
+    inferBeta (Var v)  as = undefined
+    inferBeta (Sym s)  as = f s as
+    inferBeta (b :$ e) as = inferBeta b (inferEta e :* as)
+    inferBeta (b :# p) as = inferBeta b (p :~ as)
+
+    inferEta :: Eta sym sig -> Arg (Beta sym) sig
+    inferEta (Lam v e)  = AVar v (inferEta e)
+    inferEta (ELam p e) = APlace p (inferEta e)
+    inferEta (Spine b)  = ASym b
+
+--------------------------------------------------------------------------------
 -- ** Extensions.
 --------------------------------------------------------------------------------
 
 --------------------------------------------------------------------------------
--- *** Decoration.
+-- *** Labelling.
 
 -- | Decorated symbol.
 data (sym :&: info) sig where
@@ -245,52 +296,16 @@ instance Render Local where
 -- * Region inference.
 --------------------------------------------------------------------------------
 
--- | Erase any \"Put\" predicates in a signature.
-type family Erasure a where
-    Erasure ('Const a)    = 'Const a
-    Erasure (a ':-> b)    = Erasure a ':-> Erasure b
-    Erasure ('Put ':=> a) = Erasure a
-
--- class Infer s t where inferSym :: (sig ~ Erasure sig') => s sig -> Beta t sig'
-
---------------------------------------------------------------------------------
-
--- | Context consists of a list of \"Place\"'s associated with the region of a
---   \"Put\" predicate.
+-- | Predicate context.
 type P = [(Place,Region)]
 
--- | Variable assignments consists of ...
+-- | Region substitutions.
+type S = IntMap Region
+
+-- | Variable assignments.
 type A sym = IntMap (Ex (sym :&: SigRep))
 
-inferBeta :: (sig ~ Erasure sig') => Beta s sig -> M (P,A t,S,Beta t sig')
-inferBeta (Var _)  = undefined
-inferBeta (Sym _)  = undefined
-inferBeta (_ :$ _) = undefined
-inferBeta _ = error "Already inferred."
-
-inferEta :: (sig ~ Erasure sig') => Eta s sig -> M (P,A t,S,Eta t sig')
-inferEta (Lam _ _)  = undefined
-inferEta (Spine _)  = undefined
-inferEta _ = error "Already inferred."
-
---------------------------------------------------------------------------------
-
-inferSym :: (sig ~ Erasure sig') => s sig -> M (P,A t,S,Beta t sig')
-inferSym = undefined
-
-{-
-instantiate :: forall sym sig
-    .  Env sym
-    -> Beta sym sig
-    -> M (Subst, QualType sig, Beta sym sig)
-instantiate env b@(Var v) = case Map.lookup v env of
-    Nothing       -> error ("Unknown identifier: " ++ show v ++ "\n")
-    Just (ps,E t) -> do
-        ps' <- newNames (length ps)
-        let s = newSub (zip ps ps')
-        return (s, undefined, foldr (flip (:#)) b ps')
-instantiate _ _ = error "Instantiate not called on variable."
--}
+-- todo
 
 --------------------------------------------------------------------------------
 -- ** Utils.
@@ -310,11 +325,14 @@ newNames n = mapM (const newName) [1..n]
 
 --------------------------------------------------------------------------------
 
--- | Region-substitution.
-type S = IntMap Region
+emptySub :: S
+emptySub = Map.empty
 
 newSub :: [(Place,Name)] -> S
 newSub = Map.fromList
+
+(+@) :: (Place,Name) -> S -> S
+(+@) (p,r) s = Map.insert p r s
 
 -- | Left-biased union of two substitutions.
 (@@) :: S -> S -> S
@@ -343,9 +361,19 @@ data SExp a where
     SInt :: Int -> SExp ('Const Int)
     SAdd :: SExp ('Const Int ':-> 'Const Int ':-> 'Const Int)
 
+data TR a where
+    TRInt :: TR Int
+
+instance Prim Int where
+    primitive = TRInt
+
 instance Render SExp where
     renderSym (SInt i) = "i" ++ show i
     renderSym (SAdd)   = "(+)"
+
+instance Sym SExp where
+    symbol (SInt _) = represent
+    symbol (SAdd)   = represent
 
 --------------------------------------------------------------------------------
 
@@ -353,20 +381,20 @@ instance Render SExp where
 data TExp a where
     TInt :: Int -> TExp ('Put ':=> 'Const Int)
     TAdd :: TExp ('Put ':=> 'Const Int ':-> 'Const Int ':-> 'Const Int)
-    -- todo: add via open symbol domains instead.
-    TLocal :: Place -> TExp (a ':-> a)
+    --
+    TLocal :: Place -> TExp (a ':-> a) -- todo: open symbol domains.
+    TAt    :: Place -> TExp (a ':-> a) -- todo: ???
 
 instance Render TExp where
     renderSym (TInt i)   = renderSym (SInt i)
     renderSym (TAdd)     = renderSym (SAdd)
     renderSym (TLocal p) = "local " ++ show p
+    renderSym (TAt p)    = "at " ++ show p
 
 --------------------------------------------------------------------------------
 
-conv_sexp :: SExp a -> M (Beta TExp a)
-conv_sexp (SInt i) = do
-    p <- newName
-    return (Sym (TInt i) :# p)
+comp :: forall a . A SExp -> Beta SExp ('Const a) -> Beta TExp ('Const a)
+comp = undefined
 
 --------------------------------------------------------------------------------
 
