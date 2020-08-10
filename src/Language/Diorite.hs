@@ -235,18 +235,21 @@ infixr :*, :~
 
 -- | ...
 infer :: forall sym sym' a
-    .  (Sym sym)
+    .  (Sym sym, Sym sym')
     => (forall sig . (a ~ Result sig)
          => sym sig -> Args (Beta sym) sig -> Beta sym' ('Const a))
-    -> (forall sig . Name -> SigRep sig -> sym sig)
+    -> (forall sig sig' . (sig ~ Erasure sig')
+         => Name -> SigRep sig -> sym' sig')
     -> Beta sym ('Const a)
     -> Beta sym' ('Const a)
-infer f g a = inferBeta a Nil
+infer inferSym _ a = inferBeta a Nil
   where
     inferBeta :: (a ~ Result sig)
-        => Beta sym sig -> Args (Beta sym) sig -> Beta sym' ('Const a)
+        => Beta sym sig
+        -> Args (Beta sym) sig
+        -> Beta sym' ('Const a)
     inferBeta (Var v)  as = undefined
-    inferBeta (Sym s)  as = f s as
+    inferBeta (Sym s)  as = inferSym s as
     inferBeta (b :$ e) as = inferBeta b (inferEta e :* as)
     inferBeta (b :# p) as = inferBeta b (p :~ as)
 
@@ -254,6 +257,10 @@ infer f g a = inferBeta a Nil
     inferEta (Lam v e)  = AVar v (inferEta e)
     inferEta (ELam p e) = APlace p (inferEta e)
     inferEta (Spine b)  = ASym b
+
+    saturate :: (a ~ Result sig, sig ~ Erasure sig')
+        => SigRep sig -> sym' sig' -> Beta sym' ('Const a)
+    saturate = undefined
 
 --------------------------------------------------------------------------------
 -- ** Extensions.
