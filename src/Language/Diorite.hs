@@ -14,6 +14,7 @@ import Data.IntMap (IntMap)
 import qualified Data.IntMap as Map (insert,lookup,union,map,empty,fromList)
 
 --import Control.Arrow (first)
+import qualified Control.Applicative as A
 import Control.Monad.State (State)
 import qualified Control.Monad.State as S
 
@@ -199,7 +200,7 @@ match :: forall sym a c
     .  (forall sig . (a ~ Result sig)
            => sym sig -> Args (Beta sym) sig -> c ('Const a))
     -> (forall sig . (a ~ Result sig)
-           => Name -> Args (Beta sym) sig -> c ('Const a))
+           => Name    -> Args (Beta sym) sig -> c ('Const a))
     -> Beta sym ('Const a)
     -> c ('Const a)
 match f g = flip matchBeta Nil
@@ -215,8 +216,31 @@ match f g = flip matchBeta Nil
     matchEta (Lam v e)  = AVar v (matchEta e)
     matchEta (ELam p e) = APlace p (matchEta e)
     matchEta (Spine b)  = ASym b
--- todo: users can probably use their 'f' in the definition of 'g' but I feel
--- like I should be able to define that myself somehow, like 'f (g ..) as'
+  -- todo: users can probably use their 'f' in the definition of 'g' but I feel
+  -- like I should be able to define that myself somehow, like 'f (g ..) as'
+
+-- | A version of \"match\" with a simpler, constant result type.
+constMatch :: forall sym a b
+    .  (forall sig . (a ~ Result sig)
+           => sym sig -> Args (Beta sym) sig -> b)
+    -> (forall sig . (a ~ Result sig)
+           => Name    -> Args (Beta sym) sig -> b)
+    -> ASTF sym a -> b
+constMatch f g = A.getConst . match (\s -> A.Const . f s) (\v -> A.Const . g v)
+
+newtype WrapBeta c sym sig = WrapBeta { unWrapBeta :: c (Beta sym sig) }
+  -- Only used in the definition of 'transMatch'
+
+-- | A version of \"match\" where the result is a transformed syntax tree,
+--   wrapped in some type constructor.
+transMatch :: forall sym sym' c a
+    .  (forall sig . (a ~ Result sig)
+           => sym sig -> Args (Beta sym) sig -> c (Beta sym' ('Const a)))
+    -> (forall sig . (a ~ Result sig)
+           => Name    -> Args (Beta sym) sig -> c (Beta sym' ('Const a)))
+    -> ASTF sym a
+    -> c (ASTF sym' a)
+transMatch f g = unWrapBeta . match (\s -> WrapBeta . f s) (\v -> WrapBeta . g v)
 
 --------------------------------------------------------------------------------
 -- ** Type/Signature witness.
@@ -234,8 +258,8 @@ data SigRep sig where
     SigConst :: Prim a => SigRep ('Const a)
     SigPart  :: Region -> SigRep a -> SigRep sig -> SigRep (a ':-> sig)
     SigPred  :: Region -> SigRep sig -> SigRep ('Put ':=> sig)
-    -- todo: added 'SigRep a' to 'SigPart' since arguments can be extended with
-    -- evidence as well, might be a smarter way of doing it.
+  -- todo: added 'SigRep a' to 'SigPart' since arguments can be extended with
+  -- evidence as well, might be a smarter way of doing it.
 
 -- | Valid symbol signatures.
 class Sig sig where
@@ -292,6 +316,19 @@ class Annotate sym rgn where
 
 --------------------------------------------------------------------------------
 
+-- | Get the highest place bound for \"Eta\" node.
+maxPlaceEta :: Eta sym a -> Place
+maxPlaceEta (Lam _ e)  = maxPlaceEta e
+maxPlaceEta (ELam p _) = p
+maxPlaceEta (Spine b)  = maxPlaceBeta b
+
+-- | Get the highest place bound for \"Beta\" node.
+maxPlaceBeta :: Beta sym a -> Place
+maxPlaceBeta (b :$ e) = maxPlaceBeta b `Prelude.max` maxPlaceEta e
+maxPlaceBeta (_ :# p) = p
+maxPlaceBeta _        = 0
+  -- todo: hmm..
+
 -- | Predicate context.
 type P = [(Place,Region)]
 
@@ -304,24 +341,39 @@ type A sym = IntMap (Ex (sym :&: SigRep))
 -- | ...
 infer :: forall sym rgn a . (Sym rgn, Annotate sym rgn)
     => Beta sym ('Const a) -> Beta rgn ('Const a)
-infer = match inferSym undefined
+infer = runM . inferReg
   where
+    inferReg :: Beta sym ('Const a) -> M (Beta rgn ('Const a))
+    inferReg = transMatch inferSym undefined
+    
     inferSym :: forall sig . (a ~ Result sig)
-        => sym sig -> Args (Beta sym) sig -> Beta rgn ('Const a)
+        => sym sig -> Args (Beta sym) sig
+        -> M (Beta rgn ('Const a))
     inferSym sym as = case (annotate sym :: (rgn :&: Wit sig) ann) of
         (rgn :&: Wit) -> saturate (symbol rgn) as (Sym rgn)
 
     saturate :: forall sig ann . (a ~ Result sig, sig ~ Erasure ann)
-        => SigRep ann -> Args (Beta sym) sig -> Beta rgn ann -> Beta rgn ('Const a)
-    saturate (SigConst) (Nil) s = s
-    saturate (SigPart _ arg sig) (a :* as) s = saturate sig as (s :$ qualify arg a)
-    saturate (SigPred _ sig) as s = saturate sig as (s :# undefined)
+        => SigRep ann -> Args (Beta sym) sig -> Beta rgn ann
+        -> M (Beta rgn ('Const a))
+    saturate (SigConst) (Nil) s = do
+        return s
+    saturate (SigPart _ arg sig) (a :* as) s = do
+        a' <- qualify arg a
+        saturate sig as (s :$ a')
+    saturate (SigPred _ sig) as s = do
+        saturate sig as (s :# undefined)
 
     qualify :: forall sig ann . (sig ~ Erasure ann)
-        => SigRep ann -> Arg (Beta sym) sig -> Eta rgn ann
-    qualify (SigConst) (ASym s) = Spine (infer s)
-    qualify (SigPart _ _ sig) (AVar v arg) = Lam v (qualify sig arg)
-    qualify (SigPred _ sig) arg = ELam undefined (qualify sig arg)
+        => SigRep ann -> Arg (Beta sym) sig
+        -> M (Eta rgn ann)
+    qualify (SigConst) (ASym s) = do
+        return (Spine (infer s))
+    qualify (SigPart _ _ sig) (AVar v arg) = do
+        eta <- qualify sig arg
+        return (Lam v eta)
+    qualify (SigPred _ sig) arg = do
+        eta <- qualify sig arg
+        return (ELam undefined eta)
 
 --------------------------------------------------------------------------------
 -- *** ...
