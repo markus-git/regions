@@ -35,7 +35,7 @@ type Name = Int
 -- | Place names.
 type Place = Name
   
--- | Generic abstact sytnax tree with beta-eta long normal form.
+-- | Generic abstact syntax tree with beta-eta long normal form.
 data Beta sym (sig :: Signature *) where
     Var  :: Name -> Beta sym sig
     Sym  :: sym sig -> Beta sym sig
@@ -129,6 +129,17 @@ sugarSym :: Syntactic a => Domain a (Internal a) -> a
 sugarSym = sugar . Sym
 
 --------------------------------------------------------------------------------
+-- ** Evaluation.
+--------------------------------------------------------------------------------
+
+type family Denotation sig where
+    Denotation ('Const a)    = a
+    Denotation (a ':-> b)    = Denotation a -> Denotation b
+    -- ...
+
+-- todo.
+
+--------------------------------------------------------------------------------
 -- ** Rendering.
 --------------------------------------------------------------------------------
 
@@ -159,15 +170,53 @@ instance Render sym => Show (Eta sym a) where
     show = renderEta
 
 --------------------------------------------------------------------------------
--- ** Evaluation.
+-- ** Traversal.
 --------------------------------------------------------------------------------
 
-type family Denotation sig where
-    Denotation ('Const a)    = a
-    Denotation (a ':-> b)    = Denotation a -> Denotation b
-    -- ...
+-- | Denotational result of a symbol's signature.
+type family Result sig where
+    Result ('Const a)    = a
+    Result (a ':-> b)    = Result b
+    Result ('Put ':=> a) = Result a
 
--- todo.
+-- | Argument parameterized on variables and places.
+data Arg c (sig :: Signature *) where
+    AVar   :: Name -> Arg c a -> Arg c (sig ':-> a)
+    APlace :: Place -> Arg c a -> Arg c ('Put ':=> a)
+    ASym   :: c ('Const a) -> Arg c ('Const a)
+
+-- | List of symbol arguments.
+data Args c (sig :: Signature *) where
+    Nil  :: Args c ('Const a)
+    (:*) :: Arg c a -> Args c sig -> Args c (a ':-> sig)
+    (:~) :: Place -> Args c sig -> Args c ('Put ':=> sig)
+
+infixr :*, :~
+
+-- | \"Pattern match\" on a fully applied AST using a function that gets direct
+--   access to the top-most symbol and its sub-trees given as \"Args\".
+match :: forall sym a c
+    .  (forall sig . (a ~ Result sig)
+           => sym sig -> Args (Beta sym) sig -> c ('Const a))
+    -> (forall sig . (a ~ Result sig)
+           => Name -> Args (Beta sym) sig -> c ('Const a))
+    -> Beta sym ('Const a)
+    -> c ('Const a)
+match f g = flip matchBeta Nil
+  where
+    matchBeta :: forall sig . (a ~ Result sig)
+        => Beta sym sig -> Args (Beta sym) sig -> c ('Const a)
+    matchBeta (Var v)  as = g v as
+    matchBeta (Sym s)  as = f s as
+    matchBeta (b :$ e) as = matchBeta b (matchEta e :* as)
+    matchBeta (b :# p) as = matchBeta b (p :~ as)
+
+    matchEta :: Eta sym sig -> Arg (Beta sym) sig
+    matchEta (Lam v e)  = AVar v (matchEta e)
+    matchEta (ELam p e) = APlace p (matchEta e)
+    matchEta (Spine b)  = ASym b
+-- todo: users can probably use their 'f' in the definition of 'g' but I feel
+-- like I should be able to define that myself somehow, like 'f (g ..) as'
 
 --------------------------------------------------------------------------------
 -- ** Type/Signature witness.
@@ -183,8 +232,10 @@ type Region = Name
 -- | Witness of a symbol signature.
 data SigRep sig where
     SigConst :: Prim a => SigRep ('Const a)
-    SigPart  :: Region -> SigRep sig -> SigRep (a ':-> sig)
+    SigPart  :: Region -> SigRep a -> SigRep sig -> SigRep (a ':-> sig)
     SigPred  :: Region -> SigRep sig -> SigRep ('Put ':=> sig)
+    -- todo: added 'SigRep a' to 'SigPart' since arguments can be extended with
+    -- evidence as well, might be a smarter way of doing it.
 
 -- | Valid symbol signatures.
 class Sig sig where
@@ -193,81 +244,28 @@ class Sig sig where
 instance Prim a => Sig ('Const a) where
     represent = SigConst
 
-instance Sig sig => Sig (a ':-> sig) where
-    represent = SigPart 0 represent
+instance (Sig a, Sig sig) => Sig (a ':-> sig) where
+    represent = SigPart undefined represent represent
 
 instance Sig sig => Sig ('Put ':=> sig) where
-    represent = SigPred 0 represent
+    represent = SigPred undefined represent
 
 -- | Symbol with a valid signature.
 class Sym sym where
     symbol :: sym sig -> SigRep sig
 
 --------------------------------------------------------------------------------
--- ** Region inference.
+-- * Region inference.
 --------------------------------------------------------------------------------
 
--- | Denotational result of a symbol's signature.
-type family Result sig where
-    Result ('Const a)    = a
-    Result (a ':-> b)    = Result b
-    Result ('Put ':=> a) = Result a
+-- | Local region-bindings.
+data Local sig where
+    Local :: Place -> Local (a ':-> a)
 
--- | Erasure of any \"Put\" predicates of a symbol's signature.
-type family Erasure a where
-    Erasure ('Const a)    = 'Const a
-    Erasure (a ':-> b)    = Erasure a ':-> Erasure b
-    Erasure ('Put ':=> a) = Erasure a
-
--- | ...
-data Arg c (sig :: Signature *) where
-    AVar   :: Name -> Arg c a -> Arg c (sig ':-> a)
-    APlace :: Place -> Arg c a -> Arg c ('Put ':=> a)
-    ASym   :: c ('Const a) -> Arg c ('Const a)
-
--- | List of symbol arguments.
-data Args c (sig :: Signature *) where
-    Nil  :: Args c ('Const a)
-    (:*) :: Arg c a -> Args c sig -> Args c (a ':-> sig)
-    (:~) :: Place -> Args c sig -> Args c ('Put ':=> sig)
-
-infixr :*, :~
-
--- | ...
-infer :: forall sym sym' a
-    .  (Sym sym, Sym sym')
-    => (forall sig . (a ~ Result sig)
-         => sym sig -> Args (Beta sym) sig -> Beta sym' ('Const a))
-    -> (forall sig sig' . (sig ~ Erasure sig')
-         => Name -> SigRep sig -> sym' sig')
-    -> Beta sym ('Const a)
-    -> Beta sym' ('Const a)
-infer inferSym _ a = inferBeta a Nil
-  where
-    inferBeta :: (a ~ Result sig)
-        => Beta sym sig
-        -> Args (Beta sym) sig
-        -> Beta sym' ('Const a)
-    inferBeta (Var v)  as = undefined
-    inferBeta (Sym s)  as = inferSym s as
-    inferBeta (b :$ e) as = inferBeta b (inferEta e :* as)
-    inferBeta (b :# p) as = inferBeta b (p :~ as)
-
-    inferEta :: Eta sym sig -> Arg (Beta sym) sig
-    inferEta (Lam v e)  = AVar v (inferEta e)
-    inferEta (ELam p e) = APlace p (inferEta e)
-    inferEta (Spine b)  = ASym b
-
-    saturate :: (a ~ Result sig, sig ~ Erasure sig')
-        => SigRep sig -> sym' sig' -> Beta sym' ('Const a)
-    saturate = undefined
+instance Render Local where
+    renderSym (Local p) = "local " ++ show p
 
 --------------------------------------------------------------------------------
--- ** Extensions.
---------------------------------------------------------------------------------
-
---------------------------------------------------------------------------------
--- *** Labelling.
 
 -- | Decorated symbol.
 data (sym :&: info) sig where
@@ -279,28 +277,19 @@ instance Render sym => Render (sym :&: info) where
     renderSym       = renderSym . decor_sym
     renderArgs args = renderArgs args . decor_sym
 
---------------------------------------------------------------------------------
--- *** Type casting (todo).
+-- | Erasure of any \"Put\" predicates of a symbol's signature.
+type family Erasure a where
+    Erasure ('Const a)    = 'Const a
+    Erasure (a ':-> b)    = Erasure a ':-> Erasure b
+    Erasure ('Put ':=> a) = Erasure a
 
--- | \"Typed\" symbol.
-data Typed sym sig where
-    Typed :: Typeable (Result sig) => sym sig -> Typed sym sig
+-- | Witness of equality under \"Erasure\" of second signature.
+data Wit sig sig' where Wit :: sig ~ Erasure sig' => Wit sig sig'
 
-instance Render sym => Render (Typed sym) where
-    renderSym (Typed s) = renderSym s
+-- | Annotate a symbol with regions, leaving original signature 'intact'.
+class Annotate sym rgn where
+    annotate :: sym sig -> (rgn :&: Wit sig) ann
 
---------------------------------------------------------------------------------
--- *** Local regions.
-
--- | Local region-bindings and region-annotations.
-data Local sig where
-    Local :: Place -> Local (a ':-> a)
-
-instance Render Local where
-    renderSym (Local p) = "local " ++ show p
-
---------------------------------------------------------------------------------
--- * Region inference.
 --------------------------------------------------------------------------------
 
 -- | Predicate context.
@@ -312,11 +301,30 @@ type S = IntMap Region
 -- | Variable assignments.
 type A sym = IntMap (Ex (sym :&: SigRep))
 
--- todo
+-- | ...
+infer :: forall sym rgn a . (Sym rgn, Annotate sym rgn)
+    => Beta sym ('Const a) -> Beta rgn ('Const a)
+infer = match inferSym undefined
+  where
+    inferSym :: forall sig . (a ~ Result sig)
+        => sym sig -> Args (Beta sym) sig -> Beta rgn ('Const a)
+    inferSym sym as = case (annotate sym :: (rgn :&: Wit sig) ann) of
+        (rgn :&: Wit) -> saturate (symbol rgn) as (Sym rgn)
+
+    saturate :: forall sig ann . (a ~ Result sig, sig ~ Erasure ann)
+        => SigRep ann -> Args (Beta sym) sig -> Beta rgn ann -> Beta rgn ('Const a)
+    saturate (SigConst) (Nil) s = s
+    saturate (SigPart _ arg sig) (a :* as) s = saturate sig as (s :$ qualify arg a)
+    saturate (SigPred _ sig) as s = saturate sig as (s :# undefined)
+
+    qualify :: forall sig ann . (sig ~ Erasure ann)
+        => SigRep ann -> Arg (Beta sym) sig -> Eta rgn ann
+    qualify (SigConst) (ASym s) = Spine (infer s)
+    qualify (SigPart _ _ sig) (AVar v arg) = Lam v (qualify sig arg)
+    qualify (SigPred _ sig) arg = ELam undefined (qualify sig arg)
 
 --------------------------------------------------------------------------------
--- ** Utils.
---------------------------------------------------------------------------------
+-- *** ...
 
 -- | Name supply monad.
 type M a = State Name a
@@ -331,6 +339,7 @@ newNames :: (Enum a, Num a) => a -> M [Name]
 newNames n = mapM (const newName) [1..n]
 
 --------------------------------------------------------------------------------
+-- *** ...
 
 emptySub :: S
 emptySub = Map.empty
@@ -338,6 +347,7 @@ emptySub = Map.empty
 newSub :: [(Place,Name)] -> S
 newSub = Map.fromList
 
+-- | ...
 (+@) :: (Place,Name) -> S -> S
 (+@) (p,r) s = Map.insert p r s
 
@@ -422,16 +432,4 @@ test_add' =
              :$ (Spine (Var 1))))))))
 
 --------------------------------------------------------------------------------
--- Old Code.
---------------------------------------------------------------------------------
-
-{-
-labelSym :: Label (Result sig) => sym sig -> M ((sym :&: Type) sig, [Qualifier])
-labelSym sym = (first (sym :&:)) <$> label
-
-substSym :: Label (Result sig) => Subst -> (sym :&: Type) sig -> (sym :&: Type) sig
-substSym s (sym :&: t) = sym :&: (subst s t)
--}
-
---------------------------------------------------------------------------------
--- fin.
+-- Fin.
