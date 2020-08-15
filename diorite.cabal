@@ -18,6 +18,10 @@ cabal-version:       >=1.10
 library
   exposed-modules:
     Language.Diorite
+    Language.Diorite.Syntax
+    Language.Diorite.Sugar
+    Language.Diorite.Traversal
+    Language.Diorite.Region
   -- other-modules:
   build-depends:
     base >=4.11 && <4.12,
