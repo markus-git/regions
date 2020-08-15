@@ -1,7 +1,13 @@
-module Language.Diorite.Region where
+module Language.Diorite.Region
+    ( (:&:)(..), Erasure, (:~~:)(..), Annotate(..)
+    --
+    , infer
+    ) where
 
 import Language.Diorite.Syntax
-import Language.Diorite.Traversal
+    ( Put(..), Signature(..), Name, Place, Beta(..), Eta(..), SigRep(..)
+    , Sym(..), Render(..), Region)
+import Language.Diorite.Traversal (Result, Arg(..), Args(..), transMatch)
 
 import Data.Type.Equality ((:~:)(..))
 

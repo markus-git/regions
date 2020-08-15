@@ -1,11 +1,15 @@
 {-# OPTIONS_GHC -Wall #-}
 
-module Language.Diorite.Traversal where
+module Language.Diorite.Traversal
+    ( Result, Arg(..), Args(..)
+    , argS
+    -- 
+    , match, constMatch, transMatch
+    ) where
 
 import Language.Diorite.Syntax
-    ( Beta(..), Eta(..), Signature(..), Put(..), Name, Place
-    , SigRep(..), Sig(..), Sym(..)
-    )
+    ( Put(..), Signature(..), Name, Place, Beta(..), Eta(..), SigRep(..)
+    , Sym(..))
 
 import qualified Control.Applicative as A
 

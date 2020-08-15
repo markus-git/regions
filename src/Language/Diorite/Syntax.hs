@@ -5,7 +5,18 @@
 --   https://github.com/emilaxelsson/syntactic
 --   https://github.com/emilaxelsson/lambda-edsl
 
-module Language.Diorite.Syntax where
+module Language.Diorite.Syntax
+    ( Put(..), Signature(..), Name, Place, Beta(..), Eta(..)
+    -- 
+    , Render(..)
+    , renderBeta, renderEta
+    --
+    , Prim, Region, SigRep(..), Sig(..), Sym(..)
+    , eqST
+    --
+    , Ex(..)
+    , liftE
+    ) where
 
 import Data.Type.Equality ((:~:)(..))
 import Data.Typeable (Typeable, eqT)
