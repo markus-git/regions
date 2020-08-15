@@ -7,9 +7,8 @@
 
 module Language.Diorite where
 
-import Data.Typeable (Typeable)
-
---import Data.List (intersperse)
+import Data.Type.Equality ((:~:)(..))
+import Data.Typeable (Typeable, eqT)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as Map (insert,lookup,union,map,empty,fromList)
 
@@ -254,29 +253,46 @@ class (Eq a, Show a, Typeable a) => Prim a where
 type Region = Name
 
 -- | Witness of a symbol signature.
-data SigRep sig where
+data SigRep (sig :: Signature *) where
     SigConst :: Prim a => SigRep ('Const a)
     SigPart  :: Region -> SigRep a -> SigRep sig -> SigRep (a ':-> sig)
     SigPred  :: Region -> SigRep sig -> SigRep ('Put ':=> sig)
   -- todo: added 'SigRep a' to 'SigPart' since arguments can be extended with
   -- evidence as well, might be a smarter way of doing it.
 
+-- | Extract a witness of equality of two signatures' types.
+eqST :: forall sig sig' . SigRep sig -> SigRep sig' -> Maybe (sig :~: sig')
+eqST (SigConst) (SigConst)
+    | Just Refl <- eqT :: Maybe (sig :~: sig') = Just Refl
+eqST (SigPart _ a sig) (SigPart _ a' sig')
+    | Just Refl <- eqST a a', Just Refl <- eqST sig sig' = Just Refl
+eqST (SigPred _ sig) (SigPred _ sig')
+    | Just Refl <- eqST sig sig' = Just Refl
+eqST _ _ = Nothing
+
 -- | Valid symbol signatures.
 class Sig sig where
-    represent :: SigRep sig
+    represent :: M (SigRep sig)
+  -- todo: added 'M' for now, not sure if actually needed.
 
 instance Prim a => Sig ('Const a) where
-    represent = SigConst
+    represent = return SigConst
 
 instance (Sig a, Sig sig) => Sig (a ':-> sig) where
-    represent = SigPart undefined represent represent
+    represent = SigPart <$> newName <*> represent <*> represent
 
 instance Sig sig => Sig ('Put ':=> sig) where
-    represent = SigPred undefined represent
+    represent = SigPred <$> newName <*> represent
 
 -- | Symbol with a valid signature.
 class Sym sym where
-    symbol :: sym sig -> SigRep sig
+    symbol :: sym sig -> M (SigRep sig)
+
+-- | ...
+argS :: forall sym sig . Sym sym => Arg sym sig -> M (SigRep sig)
+argS (AVar _ arg)   = SigPart <$> newName <*> undefined <*> argS arg
+argS (APlace _ arg) = SigPred <$> newName <*> argS arg
+argS (ASym s)       = symbol s
 
 --------------------------------------------------------------------------------
 -- * Region inference.
@@ -308,11 +324,14 @@ type family Erasure a where
     Erasure ('Put ':=> a) = Erasure a
 
 -- | Witness of equality under \"Erasure\" of second signature.
-data Wit sig sig' where Wit :: sig ~ Erasure sig' => Wit sig sig'
+newtype sig :~~: sig' = Erased (sig :~: Erasure sig')
+--    W :: sig ~ Erasure sig' => Wit sig sig'
+
+infixr :~~:
 
 -- | Annotate a symbol with regions, leaving original signature 'intact'.
 class Annotate sym rgn where
-    annotate :: sym sig -> (rgn :&: Wit sig) ann
+    annotate :: sym sig -> (rgn :&: (:~~:) sig) ann
 
 --------------------------------------------------------------------------------
 
@@ -335,23 +354,39 @@ type P = [(Place,Region)]
 -- | Region substitutions.
 type S = IntMap Region
 
+-- | ...
+data Ann sym where
+    A :: sig :~~: sig' -> SigRep sig -> rgn sig' -> Ann sym
+
 -- | Variable assignments.
-type A sym = IntMap (Ex (sym :&: SigRep))
+type A sym = IntMap (Ann sym)
 
 -- | ...
 infer :: forall sym rgn a . (Sym rgn, Annotate sym rgn)
-    => Beta sym ('Const a) -> Beta rgn ('Const a)
-infer = runM . inferReg
+    => Beta sym ('Const a) -> M (Beta rgn ('Const a))
+infer = transMatch inferSym inferVar
   where
-    inferReg :: Beta sym ('Const a) -> M (Beta rgn ('Const a))
-    inferReg = transMatch inferSym undefined
-    
     inferSym :: forall sig . (a ~ Result sig)
         => sym sig -> Args (Beta sym) sig
         -> M (Beta rgn ('Const a))
-    inferSym sym as = case (annotate sym :: (rgn :&: Wit sig) ann) of
-        (rgn :&: Wit) -> saturate (symbol rgn) as (Sym rgn)
+    inferSym sym as = case (annotate sym :: (rgn :&: (:~~:) sig) ann) of
+        (rgn :&: Erased Refl) -> do
+            sig <- symbol rgn
+            saturate sig as (Sym rgn)
 
+    inferVar :: forall sig . (a ~ Result sig)
+        => Name -> Args (Beta sym) sig
+        -> M (Beta rgn ('Const a))
+    inferVar = undefined
+{-        
+    inferVar var _ = case Map.lookup var undefined of
+        Nothing -> error ("unknown variable " ++ show var)
+        Just (A (Erased Refl) sig _) -> case eqST (undefined :: SigRep sig) sig of
+          Nothing -> error ("type mismatch")
+          Just Refl -> do
+              ann <- symbol rgn
+              saturate ann as (Sym rgn)
+-}
     saturate :: forall sig ann . (a ~ Result sig, sig ~ Erasure ann)
         => SigRep ann -> Args (Beta sym) sig -> Beta rgn ann
         -> M (Beta rgn ('Const a))
@@ -360,20 +395,21 @@ infer = runM . inferReg
     saturate (SigPart _ arg sig) (a :* as) s = do
         a' <- qualify arg a
         saturate sig as (s :$ a')
-    saturate (SigPred _ sig) as s = do
-        saturate sig as (s :# undefined)
+    saturate (SigPred r sig) as s = do
+        saturate sig as (s :# r) -- error!
 
     qualify :: forall sig ann . (sig ~ Erasure ann)
         => SigRep ann -> Arg (Beta sym) sig
         -> M (Eta rgn ann)
     qualify (SigConst) (ASym s) = do
-        return (Spine (infer s))
+        sym <- infer s
+        return (Spine sym)
     qualify (SigPart _ _ sig) (AVar v arg) = do
         eta <- qualify sig arg
         return (Lam v eta)
-    qualify (SigPred _ sig) arg = do
+    qualify (SigPred r sig) arg = do
         eta <- qualify sig arg
-        return (ELam undefined eta)
+        return (ELam r eta) -- error!
 
 --------------------------------------------------------------------------------
 -- *** ...
@@ -459,11 +495,6 @@ instance Render TExp where
     renderSym (TAdd)     = renderSym (SAdd)
     renderSym (TLocal p) = "local " ++ show p
     renderSym (TAt p)    = "at " ++ show p
-
---------------------------------------------------------------------------------
-
-comp :: forall a . A SExp -> Beta SExp ('Const a) -> Beta TExp ('Const a)
-comp = undefined
 
 --------------------------------------------------------------------------------
 
