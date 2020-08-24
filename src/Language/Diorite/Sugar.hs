@@ -47,9 +47,9 @@ instance Syntactic (Eta sym ('Const a)) where
 
 -- | Get the highest name bound for \"Eta\" node.
 maxLamEta :: Eta sym a -> Name
-maxLamEta (Lam n _)   = n
-maxLamEta (ELam _ e)  = maxLamEta e
-maxLamEta (Spine b)   = maxLamBeta b
+maxLamEta (n :\ _)  = n
+maxLamEta (_ :\\ e) = maxLamEta e
+maxLamEta (Spine b) = maxLamBeta b
 
 -- | Get the highest name bound for \"Beta\" node.
 maxLamBeta :: Beta sym a -> Name
@@ -59,7 +59,7 @@ maxLamBeta _        = 0
 
 -- | Interface for variable binding.
 lam :: (Beta sym a -> Eta sym b) -> Eta sym (a ':-> b)
-lam f = Lam v body
+lam f = v :\ body
   where
     v    = maxLamEta body + 1
     body = f $ Var v

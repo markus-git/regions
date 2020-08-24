@@ -1,21 +1,23 @@
+{-# OPTIONS_GHC -Wall #-}
+
 module Language.Diorite.Region
-    ( (:&:)(..), Erasure, (:~~:)(..), Annotate(..)
+    ( Erasure, (:~~:)(..)
     --
-    , infer
+--    , infer
     ) where
 
-import Language.Diorite.Syntax
-    ( Put(..), Signature(..), Name, Place, Beta(..), Eta(..), SigRep(..)
-    , Sym(..), Render(..), Region)
-import Language.Diorite.Traversal (Result, Arg(..), Args(..), transMatch)
+import Language.Diorite.Syntax --(Put(..), Signature(..), Place, Beta(..), Eta(..), SigRep(..), Sym(..), Render(..))
+--import Language.Diorite.Traversal
 
 import Data.Type.Equality ((:~:)(..))
 
-import Data.IntMap (IntMap)
-import qualified Data.IntMap as Map (insert,lookup,union,map,empty,fromList)
+--import Data.IntMap (IntMap)
+--import qualified Data.IntMap as Map (insert, lookup, union, map, empty, fromList)
 
-import Control.Monad.State (State)
-import qualified Control.Monad.State as S
+--import Control.Monad.Reader (ReaderT)
+--import qualified Control.Monad.Reader as R (ask, runReaderT)
+--import Control.Monad.State (State)
+--import qualified Control.Monad.State as S (get, put, evalState)
 
 --------------------------------------------------------------------------------
 -- * Region inference.
@@ -23,22 +25,12 @@ import qualified Control.Monad.State as S
 
 -- | Local region-bindings.
 data Local sig where
-    Local :: Place -> Local (a ':-> a)
+    Local :: Place -> Local sig
 
 instance Render Local where
     renderSym (Local p) = "local " ++ show p
 
 --------------------------------------------------------------------------------
-
--- | Decorated symbol.
-data (sym :&: info) sig where
-    (:&:) :: { decor_sym  :: sym sig
-             , decor_info :: info sig }
-          -> (sym :&: info) sig
-
-instance Render sym => Render (sym :&: info) where
-    renderSym       = renderSym . decor_sym
-    renderArgs args = renderArgs args . decor_sym
 
 -- | Erasure of any \"Put\" predicates of a symbol's signature.
 type family Erasure a where
@@ -48,110 +40,71 @@ type family Erasure a where
 
 -- | Witness of equality under \"Erasure\" of second signature.
 newtype sig :~~: sig' = Erased (sig :~: Erasure sig')
---    W :: sig ~ Erasure sig' => Wit sig sig'
 
 infixr :~~:
 
--- | Annotate a symbol with regions, leaving original signature 'intact'.
-class Annotate sym rgn where
-    annotate :: sym sig -> (rgn :&: (:~~:) sig) ann
-
 --------------------------------------------------------------------------------
-
--- | Get the highest place bound for \"Eta\" node.
-maxPlaceEta :: Eta sym a -> Place
-maxPlaceEta (Lam _ e)  = maxPlaceEta e
-maxPlaceEta (ELam p _) = p
-maxPlaceEta (Spine b)  = maxPlaceBeta b
-
--- | Get the highest place bound for \"Beta\" node.
-maxPlaceBeta :: Beta sym a -> Place
-maxPlaceBeta (b :$ e) = maxPlaceBeta b `Prelude.max` maxPlaceEta e
-maxPlaceBeta (_ :# p) = p
-maxPlaceBeta _        = 0
-  -- todo: hmm..
-
--- | Predicate context.
-type P = [(Place,Region)]
-
--- | Region substitutions.
-type S = IntMap Region
-
+{-
 -- | ...
-data Ann sym where
-    A :: sig :~~: sig' -> SigRep sig -> rgn sig' -> Ann sym
-
--- | Variable assignments.
-type A sym = IntMap (Ann sym)
-
--- | ...
-infer :: forall sym rgn a . (Sym rgn, Annotate sym rgn)
-    => Beta sym ('Const a) -> M (Beta rgn ('Const a))
-infer = transMatch inferSym inferVar
+infer :: forall sym sym' a
+    .  (forall sig . sym sig -> Int)
+        -- ^ ...
+    -> Beta sym ('Const a)
+        -- ^ ...
+    -> Beta sym' ('Const a)
+infer f = match inferSym undefined
   where
     inferSym :: forall sig . (a ~ Result sig)
-        => sym sig -> Args (Beta sym) sig
-        -> M (Beta rgn ('Const a))
-    inferSym sym as = case (annotate sym :: (rgn :&: (:~~:) sig) ann) of
-        (rgn :&: Erased Refl) -> do
-            sig <- return (symbol rgn) -- error!
-            saturate sig as (Sym rgn)
+        => sym sig -> Args sym sig -> Beta sym' ('Const a)
+    inferSym _ _ = undefined
 
-    inferVar :: forall sig . (a ~ Result sig)
-        => Name -> Args (Beta sym) sig
-        -> M (Beta rgn ('Const a))
-    inferVar = undefined
-{-        
-    inferVar var _ = case Map.lookup var undefined of
-        Nothing -> error ("unknown variable " ++ show var)
-        Just (A (Erased Refl) sig _) -> case eqST (undefined :: SigRep sig) sig of
-          Nothing -> error ("type mismatch")
-          Just Refl -> do
-              ann <- symbol rgn
-              saturate ann as (Sym rgn)
+    inferBeta :: (a ~ Result sig, sig ~ Erasure sig')
+        => Beta sym' sig' -> Args sym sig -> SigRep sig' -> Beta sym' ('Const a)
+    inferBeta b (Nil)     (SigConst)        = b
+    inferBeta b (a :* as) (SigPart arg sig) = inferBeta (b :$ inferEta a arg) as sig
+    inferBeta b as        (SigPred sig)     = inferBeta (b :# 0) as sig -- region.
+
+    inferEta :: (sig ~ Erasure sig')
+        => Eta sym sig -> SigRep sig' -> Eta sym' sig'
+    inferEta (Spine b) (SigConst)      = Spine (infer f b)
+    inferEta (v :\ e)  (SigPart _ sig) = v :\ inferEta e sig
+    inferEta e         (SigPred sig)   = 0 :\\ inferEta e sig -- region.
 -}
-    saturate :: forall sig ann . (a ~ Result sig, sig ~ Erasure ann)
-        => SigRep ann -> Args (Beta sym) sig -> Beta rgn ann
-        -> M (Beta rgn ('Const a))
-    saturate (SigConst) (Nil) s = do
-        return s
-    saturate (SigPart _ arg sig) (a :* as) s = do
-        a' <- qualify arg a
-        saturate sig as (s :$ a')
-    saturate (SigPred r sig) as s = do
-        saturate sig as (s :# r) -- error!
 
-    qualify :: forall sig ann . (sig ~ Erasure ann)
-        => SigRep ann -> Arg (Beta sym) sig
-        -> M (Eta rgn ann)
-    qualify (SigConst) (ASym s) = do
-        sym <- infer s
-        return (Spine sym)
-    qualify (SigPart _ _ sig) (AVar v arg) = do
-        eta <- qualify sig arg
-        return (Lam v eta)
-    qualify (SigPred r sig) arg = do
-        eta <- qualify sig arg
-        return (ELam r eta) -- error!
-
+{-
+    inferSym sym as = case (label sym :: (sig :~~: sig', sym' sig')) of
+        (Erased Refl, sym') -> inferBeta (Sym sym') as (symbol sym')
+-}
 --------------------------------------------------------------------------------
--- *** ...
+-- ** Inference monad.
+{-
+-- | Assignment, ...
+data A sym where A :: sig :~~: sig' -> SigRep sig -> sym sig' -> A sym
+
+-- | Variable assignments.
+type VA sym = IntMap (A sym)
+
+-- | Predicate context.
+--type P = [(Place,Region)]
+
+-- | Region substitutions.
+--type S = IntMap Region
 
 -- | Name supply monad.
-type M a = State Name a
+type M sym a = ReaderT (VA sym) (State Name) a
 
-runM :: M a -> a
-runM = flip S.evalState 0
+runM :: VA sym -> M sym a -> a
+runM env = flip S.evalState 0 . flip R.runReaderT env
 
-newName :: M Name
+newName :: M sym Name
 newName = do n <- S.get; S.put (n+1); return n
 
-newNames :: (Enum a, Num a) => a -> M [Name]
+newNames :: (Enum a, Num a) => a -> M sym [Name]
 newNames n = mapM (const newName) [1..n]
-
+-}
 --------------------------------------------------------------------------------
--- *** ...
-
+-- *** Subst.
+{-
 emptySub :: S
 emptySub = Map.empty
 
@@ -170,6 +123,59 @@ newSub = Map.fromList
     update r = case Map.lookup r a of
       Nothing -> r
       Just r' -> r'
+-}
+--------------------------------------------------------------------------------
+-- Old stuff
+{-
+-- | Labelling of primitive types.
+class (Eq a, Show a, Typeable a) => Prim a
 
+-- | Extract a witness of equality of two signatures' types, ignoring any regions.
+eqSigT :: forall sig sig' . SigRep sig -> SigRep sig' -> Maybe (sig :~: sig')
+eqSigT (SigConst) (SigConst)
+    | Just Refl <- eqT :: Maybe (sig :~: sig') = Just Refl
+eqSigT (SigPart _ a sig) (SigPart _ a' sig')
+    | Just Refl <- eqSigT a a', Just Refl <- eqSigT sig sig' = Just Refl
+eqSigT (SigPred _ sig) (SigPred _ sig')
+    | Just Refl <- eqSigT sig sig' = Just Refl
+eqSigT _ _ = Nothing
+
+symbolBeta :: Sym sym => Beta sym sig -> SigRep sig
+symbolBeta (Var v)  = undefined
+symbolBeta (Sym s)  = symbol s
+symbolBeta (b :$ _) = case (symbolBeta b) of (SigPart _ _ sig) -> sig
+symbolBeta (b :# _) = case (symbolBeta b) of (SigPred _ sig) -> sig
+
+-- | Get the highest place bound for \"Eta\" node.
+maxPlaceEta :: Eta sym a -> Place
+maxPlaceEta (_ :\ e)  = maxPlaceEta e
+maxPlaceEta (p :\\ _) = p
+maxPlaceEta (Spine b) = maxPlaceBeta b
+
+-- | Get the highest place bound for \"Beta\" node.
+maxPlaceBeta :: Beta sym a -> Place
+maxPlaceBeta (b :$ e) = maxPlaceBeta b `Prelude.max` maxPlaceEta e
+maxPlaceBeta (b :# _) = maxPlaceBeta b
+maxPlaceBeta _        = 0
+
+withSym :: forall sym sym' sig c . Annotate sym sym'
+    => sym sig
+    -> (forall sig' . sig ~ Erasure sig' => sym' sig' -> c)
+    -> M sym' c
+withSym sym f = case (annotate sym :: (sig :~~: ann, sym' ann)) of
+    (Erased Refl, rgn) -> return (f rgn)
+
+withVar :: forall sym sig c
+    .  Name -> SigRep sig
+    -> (forall sig' . sig ~ Erasure sig' => sym sig' -> c)
+    -> M sym c
+withVar v sig f = do
+    va <- R.ask
+    case Map.lookup v va of
+        Nothing -> error ("Unknown variable " ++ show v)
+        Just (A (Erased Refl) sig' sym) -> case eqSigT sig sig' of
+            Nothing -> error ("Signature mismatch " ++ undefined)
+            Just Refl -> return (f sym)
+-}
 --------------------------------------------------------------------------------
 -- Fin.

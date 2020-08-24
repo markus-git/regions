@@ -6,20 +6,31 @@
 --   https://github.com/emilaxelsson/lambda-edsl
 
 module Language.Diorite.Syntax
-    ( Put(..), Signature(..), Name, Place, Beta(..), Eta(..)
+    ( Put(..)
+    , Signature(..)
+    , Name
+    , Place
+    , Beta(..)
+    , Eta(..)
+    , AST
+    , ASTF
     -- 
     , Render(..)
-    , renderBeta, renderEta
+    , renderBeta
+    , renderEta
     --
-    , Prim, Region, SigRep(..), Sig(..), Sym(..)
-    , eqST
+    , Region
+    , SigRep(..)
+    , Sig(..)
+    , Sym(..)
     --
+    , Empty
     , Ex(..)
     , liftE
     ) where
 
-import Data.Type.Equality ((:~:)(..))
-import Data.Typeable (Typeable, eqT)
+--import Data.Type.Equality ((:~:)(..))
+--import Data.Typeable (Typeable, eqT)
 
 --------------------------------------------------------------------------------
 -- * Abstract syntax tree.
@@ -38,20 +49,22 @@ type Name = Int
 
 -- | Place names.
 type Place = Name
-  
+
 -- | Generic abstact syntax tree with beta-eta long normal form.
 data Beta sym (sig :: Signature *) where
     Var  :: Name -> Beta sym sig
     Sym  :: sym sig -> Beta sym sig
-    (:$) :: Beta sym (sig ':-> a) -> Eta sym sig -> Beta sym a
+    (:$) :: Beta sym (a ':-> sig) -> Eta sym a -> Beta sym sig
     (:#) :: Beta sym ('Put ':=> sig) -> Place -> Beta sym sig
 
 data Eta sym (sig :: Signature *) where
-    Lam   :: Name -> Eta sym a -> Eta sym (sig ':-> a)
-    ELam  :: Place -> Eta sym sig -> Eta sym ('Put ':=> sig)
+    (:\)  :: Name -> Eta sym sig -> Eta sym (a ':-> sig)
+    (:\\) :: Place -> Eta sym sig -> Eta sym ('Put ':=> sig)
     Spine :: Beta sym ('Const sig) -> Eta sym ('Const sig)
 
 infixl 1 :$, :#
+
+infixr :\, :\\
 
 -- | Generic AST, parameterized by a symbol domain.
 type AST sym sig = Beta sym sig
@@ -66,7 +79,7 @@ type ASTF sym sig = Beta sym ('Const sig)
 type family Denotation sig where
     Denotation ('Const a)    = a
     Denotation (a ':-> b)    = Denotation a -> Denotation b
-    -- ...
+    Denotation ('Put ':=> a) = Name -> Denotation a
 
 -- todo.
 
@@ -90,9 +103,9 @@ renderBeta args (s :# p) = renderBeta (("<" ++ show p ++ ">") : args) s
 
 -- | Render an \"Eta\" spine as concrete syntax.
 renderEta :: Render sym => Eta sym a -> String
-renderEta (Lam n e)  = "(\\" ++ show n ++ ". " ++ renderEta e ++ ")"
-renderEta (ELam p e) = "(/\\" ++ show p ++ ". " ++ renderEta e ++ ")"
-renderEta (Spine b)  = renderBeta [] b
+renderEta (n :\ e)  = "(\\" ++ show n ++ ". " ++ renderEta e ++ ")"
+renderEta (p :\\ e) = "(/\\" ++ show p ++ ". " ++ renderEta e ++ ")"
+renderEta (Spine b) = renderBeta [] b
 
 instance Render sym => Show (Beta sym a) where
     show = renderBeta []
@@ -104,43 +117,27 @@ instance Render sym => Show (Eta sym a) where
 -- ** Type/Signature witness.
 --------------------------------------------------------------------------------
 
--- | Labelling of primitive types.
-class (Eq a, Show a, Typeable a) => Prim a
-
 -- | Name of a region, associated with one or more places.
 type Region = Name
 
 -- | Witness of a symbol signature.
 data SigRep (sig :: Signature *) where
-    SigConst :: Prim a => SigRep ('Const a)
-    SigPart  :: Region -> SigRep a -> SigRep sig -> SigRep (a ':-> sig)
-    SigPred  :: Region -> SigRep sig -> SigRep ('Put ':=> sig)
-  -- todo: added 'SigRep a' to 'SigPart' since arguments can be extended with
-  -- evidence as well, might be a smarter way of doing it.
-
--- | Extract a witness of equality of two signatures' types.
-eqST :: forall sig sig' . SigRep sig -> SigRep sig' -> Maybe (sig :~: sig')
-eqST (SigConst) (SigConst)
-    | Just Refl <- eqT :: Maybe (sig :~: sig') = Just Refl
-eqST (SigPart _ a sig) (SigPart _ a' sig')
-    | Just Refl <- eqST a a', Just Refl <- eqST sig sig' = Just Refl
-eqST (SigPred _ sig) (SigPred _ sig')
-    | Just Refl <- eqST sig sig' = Just Refl
-eqST _ _ = Nothing
+    SigConst :: SigRep ('Const a)
+    SigPart  :: SigRep a -> SigRep sig -> SigRep (a ':-> sig)
+    SigPred  :: SigRep sig -> SigRep ('Put ':=> sig)
 
 -- | Valid symbol signatures.
 class Sig sig where
-    represent :: SigRep sig
-  -- todo: not sure what to do with the regions.
+    signature :: SigRep sig
 
-instance Prim a => Sig ('Const a) where
-    represent = SigConst
+instance Sig ('Const a) where
+    signature = SigConst
 
 instance (Sig a, Sig sig) => Sig (a ':-> sig) where
-    represent = SigPart undefined represent represent
+    signature = SigPart signature signature
 
 instance Sig sig => Sig ('Put ':=> sig) where
-    represent = SigPred undefined represent
+    signature = SigPred signature
 
 -- | Symbol with a valid signature.
 class Sym sym where
@@ -149,6 +146,9 @@ class Sym sym where
 --------------------------------------------------------------------------------
 -- ** Utils.
 --------------------------------------------------------------------------------
+
+-- | Empty symbol type
+data Empty :: * -> *
 
 -- | Existential quantification.
 data Ex e where
