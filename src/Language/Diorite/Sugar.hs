@@ -1,18 +1,18 @@
-{-# OPTIONS_GHC -Wall #-}
-
 module Language.Diorite.Sugar
     ( Syntactic(..)
     , resugar
     , sugarSym
     ) where
 
-import Language.Diorite.Syntax (Beta(..), Eta(..), Signature(..), Name)
+import Language.Diorite.Syntax (Name, Signature(..), Beta(..), Eta(..))
+
+--import Data.Typeable (Typeable)
 
 --------------------------------------------------------------------------------
 -- * Syntactic sugaring.
 --------------------------------------------------------------------------------
 
--- | Syntactic sugaring for AST embeddings.
+-- | Syntactic sugaring for 'AST' embeddings.
 class Syntactic a where
     type Domain a   :: Signature * -> *
     type Internal a :: Signature *
@@ -45,13 +45,13 @@ instance Syntactic (Eta sym ('Const a)) where
     sugar   = Spine
     desugar = id
 
--- | Get the highest name bound for \"Eta\" node.
+-- | Get the highest name bound for 'Eta' node.
 maxLamEta :: Eta sym a -> Name
 maxLamEta (n :\ _)  = n
 maxLamEta (_ :\\ e) = maxLamEta e
 maxLamEta (Spine b) = maxLamBeta b
 
--- | Get the highest name bound for \"Beta\" node.
+-- | Get the highest name bound for 'Beta' node.
 maxLamBeta :: Beta sym a -> Name
 maxLamBeta (b :$ e) = maxLamBeta b `Prelude.max` maxLamEta e
 maxLamBeta (b :# _) = maxLamBeta b

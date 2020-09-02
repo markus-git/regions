@@ -20,12 +20,14 @@ library
     Language.Diorite
     Language.Diorite.Syntax
     Language.Diorite.Sugar
+    Language.Diorite.Interpretation
+    Language.Diorite.Decoration
     Language.Diorite.Traversal
     Language.Diorite.Region
   -- other-modules:
   build-depends:
     base >=4.11 && <4.12,
-  -- constraints < 0.11,
+    constraints < 0.11,
     containers < 0.7,
     mtl >= 2 && < 2.3
   hs-source-dirs:    src
