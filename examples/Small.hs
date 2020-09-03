@@ -7,9 +7,10 @@ import Language.Diorite.Region
 
 import Data.List (partition)
 --import Data.Dynamic (Dynamic, toDyn, fromDynamic)
-import Data.Typeable (Typeable) --, eqT)
+import Data.Proxy (Proxy(..))
+import Data.Typeable (Typeable, eqT)
 import Data.Type.Equality ((:~:)(..))
---import Data.Constraint (Dict(..))
+import Data.Constraint (Dict(..))
 
 --import Control.Monad.Reader (ReaderT)
 import Control.Monad.State (State)
@@ -68,6 +69,14 @@ data Prim a where
 eqPrim :: Prim a -> Prim b -> Maybe (a :~: b)
 eqPrim (PInt _) (PInt _) = Just Refl
 
+witType :: Prim a -> Dict (Typeable a)
+witType (PInt _) = Dict
+
+witProxy :: Typeable a => Proxy a -> Prim b -> Maybe (a :~: b)
+witProxy _ p | Dict <- witType p = eqT
+
+--------------------------------------------------------------------------------
+
 data TypeRep a where
     TypeConst :: Prim a -> TypeRep ('Const a)
     TypePart  :: Region -> TypeRep a -> TypeRep sig -> TypeRep (a ':-> sig)
@@ -84,15 +93,37 @@ eqType _ _ = Nothing
 
 --------------------------------------------------------------------------------
 
+-- instantiate/apply.
 reduceBeta :: forall sig rsig a . (a ~ Result sig, sig ~ Erasure rsig)
-    => Beta TExp rsig -> TypeRep rsig -> Args (Eta SExp) sig
-    -> Beta TExp ('Const a)
-reduceBeta beta (TypeConst p) (Nil) =
-    beta
-reduceBeta beta (TypePart r a sig) (eta :* as) =
-    undefined
-reduceBeta beta (TypePred r sig) (p :~ as) =
-    undefined
+    => Env -> Beta TExp rsig -> TypeRep rsig -> Args (Eta SExp) sig
+    -> M (Sub, Context, Beta TExp ('Const a))
+reduceBeta env beta (TypeConst p) (Nil) =
+    return ([], [], beta)
+reduceBeta env beta (TypePart r a sig) (eta :* as) = do
+    (s, c, eta') <- reduceEta env eta a
+    (s', c', beta') <- reduceBeta env (beta :$ eta') sig as
+    return ([], [], beta')
+reduceBeta env beta (TypePred r sig) as = do
+    p <- newName
+    (s, c, beta') <- reduceBeta env (beta :# p) sig as
+    return ([], [], beta')
+  -- todo: 'sig ~ Erasure rsig' means that we cannot have ':~' in the args.
+
+-- instantiate/abstract.
+reduceEta :: forall sig rsig a . (sig ~ Erasure rsig)
+    => Env -> Eta SExp sig -> TypeRep rsig
+    -> M (Sub, Context, Eta TExp rsig)
+reduceEta env (Spine beta) (TypeConst p) | Dict <- witType p = do
+    (s, c, _, beta') <- inferM env beta
+    return (s, c, Spine beta')
+reduceEta env (v :\ eta) (TypePart r a sig) = do
+    (s, c, eta') <- reduceEta env eta sig
+    return (s, c, v :\ eta')
+reduceEta env eta (TypePred r sig) = do
+    p <- newName
+    (s, c, eta') <- reduceEta env eta sig
+    return (s, c, p :\\ eta')
+  -- todo: same "erasure" issue as 'reduceBeta'.
 
 --------------------------------------------------------------------------------
 
@@ -101,7 +132,29 @@ inferVar :: forall sig a . (a ~ Result sig)
   -> M (Sub, Context, Prim a, Beta TExp ('Const a))
 inferVar env name as = case lookup name env of
     Nothing     -> error "E1"
-    Just (Ex t) -> undefined
+    Just (Ex t) -> case witness as t of
+      Nothing            -> error "E2"
+      Just (Erased Refl) -> do
+        (s, c, beta') <- reduceBeta env (Var name) t as
+        return (s, c, undefined, beta')
+
+witness :: forall sig rsig c . Args c sig -> TypeRep rsig -> Maybe (sig :~~: rsig)
+witness a@(Nil) (TypeConst p)
+  | Just Refl <- witProxy (proxy a) p
+  = Just (Erased Refl)
+  where proxy :: Args c ('Const a) -> Proxy a
+        proxy _ = Proxy
+witness (c :* as) (TypePart r a sig)
+  | Just (Erased Refl) <- witness2 c a
+  , Just (Erased Refl) <- witness as sig
+  = undefined
+witness as (TypePred r sig)
+  | Just (Erased Refl) <- witness as sig
+  = Just (Erased Refl)
+witness _ _ = Nothing
+
+witness2 :: c sig -> TypeRep rsig -> Maybe (sig :~~: rsig)
+witness2 = undefined
 
 --------------------------------------------------------------------------------
 
@@ -123,10 +176,10 @@ inferSym env (SAdd) (Spine a :* Spine b :* Nil) = do
         Sym TAdd :# p :$ Spine a' :$ Spine b')
 inferSym env (SLet) (Spine a :* (v :\ Spine f) :* Nil) = do
     (_, _, _, a') <- inferM env a
-    (_, _, _, f') <- inferM env f
+    (_, _, t, f') <- inferM env f
     p <- newName
     r <- newName
-    return $ ([], [], undefined,
+    return $ ([], [], t,
         Sym TLet :# p :$ (undefined :\\ Spine a') :$ undefined)
 
 --------------------------------------------------------------------------------
@@ -134,7 +187,7 @@ inferSym env (SLet) (Spine a :* (v :\ Spine f) :* Nil) = do
 inferRgn :: forall sig a . (a ~ Result sig)
     => Env -> SExp sig -> Args (Eta SExp) sig
     -> M (Sub, Context, Prim a, Beta TExp ('Const a))
-inferRgn e as = undefined
+inferRgn e sym as = inferSym e sym as
 --        (p,t,e') <- inferSym env e as
 --        let (f,b) = partCxt (not . flip elem (rgnPrim t)) p
 --        return $ (b, t, foldr extend e' (map fst f))
@@ -145,7 +198,8 @@ inferRgn e as = undefined
 --------------------------------------------------------------------------------
 
 -- | ...
-inferM :: forall a .  Env
+inferM :: forall a . Typeable a
+    => Env
     -> Beta SExp ('Const a)
     -> M (Sub, Context, Prim a, Beta TExp ('Const a))
 inferM env = constMatch (inferRgn env) (inferVar env)

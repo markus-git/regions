@@ -12,7 +12,7 @@ module Language.Diorite.Traversal
 import Language.Diorite.Syntax
     (Name, Place, Put(..), Signature(..), Beta(..), Eta(..))
 
---import Data.Typeable (Typeable)
+import Data.Typeable (Typeable)
 
 import qualified Control.Applicative as A
 
@@ -22,9 +22,10 @@ import qualified Control.Applicative as A
 
 -- | List of arguments.
 data Args c (sig :: Signature *) where
-    Nil  :: Args c ('Const a)
+    Nil  :: Typeable a => Args c ('Const a)
     (:*) :: c a -> Args c sig -> Args c (a ':-> sig)
     (:~) :: Place -> Args c sig -> Args c ('Put ':=> sig)
+--
 
 infixr :*, :~
 
@@ -36,8 +37,8 @@ type family Result sig where
   
 -- | "Pattern match" on a fully applied 'AST' using a function that gets direct
 --   access to the top-most symbol and its sub-trees given as 'Args'.
-match :: forall sym a c
-    .  (forall sig . (a ~ Result sig) =>
+match :: forall sym a c . Typeable a
+    => (forall sig . (a ~ Result sig) =>
             sym sig -> Args (Eta sym) sig -> c ('Const a))
          -- ^ ...
     -> (forall sig . (a ~ Result sig) =>
@@ -56,8 +57,8 @@ match matchSym matchVar = flip matchBeta Nil
     matchBeta (b :# p) as = matchBeta b (p :~ as)
 
 -- | A version of 'match' with a simpler, constant result type.
-constMatch :: forall sym a b
-    .  (forall sig . (a ~ Result sig) =>
+constMatch :: forall sym a b . Typeable a
+    => (forall sig . (a ~ Result sig) =>
             sym sig -> Args (Eta sym) sig -> b)
     -> (forall sig . (a ~ Result sig) =>
             Name -> Args (Eta sym) sig -> b)
@@ -69,8 +70,8 @@ newtype WrapBeta c sym sig = WrapBeta { unWrapBeta :: c (Beta sym sig) }
 
 -- | A version of 'match' where the result is a transformed syntax tree, wrapped
 --   in some type constructor.
-transMatch :: forall sym sym' c a
-    .  (forall sig . (a ~ Result sig) =>
+transMatch :: forall sym sym' c a . Typeable a
+    =>  (forall sig . (a ~ Result sig) =>
             sym sig -> Args (Eta sym) sig -> c (Beta sym' ('Const a)))
     -> (forall sig . (a ~ Result sig) =>
             Name -> Args (Eta sym) sig -> c (Beta sym' ('Const a)))
