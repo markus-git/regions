@@ -56,7 +56,7 @@ maxLamBeta (b :# _) = maxLamBeta b
 maxLamBeta _        = 0
 
 -- | Interface for variable binding.
-lam :: (Sig a, Sig b) => (Beta sym a -> Eta sym b) -> Eta sym (a ':-> b)
+lam :: Sig a => (Beta sym a -> Eta sym b) -> Eta sym (a ':-> b)
 lam f = v :\ body
   where
     v    = maxLamEta body + 1
@@ -68,7 +68,6 @@ instance
     , Syntactic b
     , Domain a ~ Domain b
     , Sig (Internal a)
-    , Sig (Internal b)
     )
     => Syntactic (a -> b)
   where

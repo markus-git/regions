@@ -43,7 +43,12 @@ instance Sym SExp where
 data TExp a where
     TInt :: Int -> TExp ('Put ':=> 'Const Int)
     TAdd :: TExp ('Put ':=> 'Const Int ':-> 'Const Int ':-> 'Const Int)
-    TLet :: TExp ('Put ':=> ('Put ':=> 'Const Int) ':-> ('Const Int ':-> 'Const Int) ':-> 'Const Int)
+    TLet :: TExp
+        (    'Put
+        ':=> ('Put ':=> 'Const Int)
+        ':-> ('Const Int ':-> 'Const Int)
+        ':-> 'Const Int
+        )
   -- todo: Second 'a' should maybe be wrapped in a 'Put' as well.
     TLoc :: Typeable a => Place -> TExp ('Const a ':-> 'Const a)
 
@@ -115,7 +120,7 @@ reduceEta :: forall sig rsig a . (sig ~ Erasure rsig)
 reduceEta env (Spine beta) (TypeConst p) | Dict <- primTyp p = do
     (s, c, _, beta') <- inferM env beta
     return (s, c, Spine beta')
-reduceEta env (v :\ eta) (TypePart r a sig) | Dict <- witSig sig = do
+reduceEta env (v :\ eta) (TypePart r a sig) | Dict <- witSig a = do
     (s, c, eta') <- reduceEta env eta sig
     return (s, c, v :\ eta')
 reduceEta env eta (TypePred r sig) = do
@@ -130,7 +135,7 @@ inferVar :: forall sig a . (a ~ Result sig, Sig sig)
     => Env -> Name -> Args (Eta SExp) sig
     -> M (Sub, Context, Prim a, Beta TExp ('Const a))
 inferVar env name as = case lookup name env of
-    Nothing -> error "E1"
+    Nothing -> error $ "Variable " ++ show name ++ " not found."
     Just (Ex t) -> case witErased t (signature :: SigRep sig) of
         Nothing -> error "E2"
         Just (Erased Refl) | Dict <- witSig t ->
@@ -180,14 +185,21 @@ inferSym env (SAdd) (Spine a :* Spine b :* Nil) = do
              , PInt r
              , Sym TAdd :# p :$ Spine a' :$ Spine b')
 inferSym env (SLet) (Spine a :* (v :\ Spine f) :* Nil) = do
-    (sa, ca, _, a') <- inferM env a
-    (sf, cf, t, f') <- inferM env f
+    (sa, ca, ta, a') <- inferM env a
+    let (ca_p,ca_y) = partitionBound ca env
+    let (x, rho) = case ca_y of
+          [(x,y)] -> (x,  (v, Ex (TypePred y  (TypeConst ta)))) -- todo.
+    (sf, cf, tf, f') <- inferM (rho : sub sa env) f
     p <- newName
     r <- newName
-    return $ ( []
-             , []
-             , t
-             , Sym TLet :# p :$ (undefined :\\ Spine a') :$ undefined)
+    return $ ( sub sf ((p,r) : ca_p) ++ cf
+             , sf @@ sa
+             , tf
+             , Sym TLet :# p :$ (x :\\ Spine a') :$ (v :\ Spine f'))
+  -- todo: The number of 'Put':s on 'v' depends on 'a'.
+
+signatureOf :: Eta sym (a ':-> 'Const b) -> SigRep a
+signatureOf (v :\ Spine _) = signature
 
 --------------------------------------------------------------------------------
 
@@ -224,18 +236,22 @@ var a = Var a
 one :: Beta SExp ('Const Int)
 one = Sym (SInt 1)
 
-add :: Eta SExp ('Const Int) -> Eta SExp ('Const Int) -> Beta SExp ('Const Int)
-add a b = Sym SAdd :$ a :$ b  
+add :: Beta SExp ('Const Int) -> Beta SExp ('Const Int) -> Beta SExp ('Const Int)
+add a b = Sym SAdd :$ (Spine a) :$ (Spine b)
+
+share :: Beta SExp ('Const Int) -> Eta SExp ('Const Int ':-> 'Const Int) -> Beta SExp ('Const Int)
+share a f = Sym SLet :$ (Spine a) :$ f
 
 --------------------------------------------------------------------------------
 
 test_add :: Beta SExp ('Const Int)
-test_add =
-    (add (Spine one) (Spine (add (Spine one) (Spine one))))
+test_add = one `add` (one `add` one)
 
 test_lam :: Eta SExp ('Const Int ':-> 'Const Int)
-test_lam =
-    (1 :\ (Spine (add (Spine one) (Spine (var 1)))))
+test_lam = 1 :\ (Spine (add one (var 1)))
+
+test_share :: Beta SExp ('Const Int)
+test_share = share one test_lam
 
 --------------------------------------------------------------------------------
 -- Extra stuff needed for inference.
@@ -281,13 +297,19 @@ instance Free (Ex TypeRep) where
     free (Ex e) = free e
 
 instance Free (TypeRep sig) where
-    free _ = []
-  -- todo: bound regions.
+    free (TypeConst p)    = free p
+    free (TypePart r a b) = r : free a ++ free b
+    free (TypePred r a)   = r : free a
 
 partitionFree :: Context -> Env -> Prim a -> (Context, Context)
 partitionFree ctxt env p =
   let rs = free p ++ free env
    in partition (not . flip elem rs . snd) ctxt
+
+partitionBound :: Context -> Env -> (Context, Context)
+partitionBound ctxt env =
+  let rs = free env
+   in partition (flip elem rs . snd) ctxt
 
 --------------------------------------------------------------------------------
 

@@ -35,7 +35,7 @@ import Data.Typeable (Typeable)
 
 -- | "Put" predicate, asserts that a region is allocated.
 data Put = Put
-  -- todo: Add Phantom type to 'Put' for its region.
+  -- todo: Add phantom region.
 
 -- | Signature of a symbol.
 data Signature a = Const a | Signature a :-> Signature a | Put :=> Signature a
@@ -47,7 +47,7 @@ data SigRep (sig :: Signature *) where
     SigConst :: Typeable a => SigRep ('Const a)
     SigPart  :: SigRep a -> SigRep sig -> SigRep (a ':-> sig)
     SigPred  :: SigRep sig -> SigRep ('Put ':=> sig)
-  -- todo: 'Typeable' feels arbitrary here but is needed for rgn. inference.
+  -- todo: 'Typeable' feels arbitrary here but it is needed for rgn. inference.
 
 -- | Valid symbol signatures.
 class Sig sig where
@@ -84,7 +84,7 @@ data Beta sym (sig :: Signature *) where
   -- todo: Have Haskell handle regions a la "Typing Dynamic Typing"(?).
 
 data Eta sym (sig :: Signature *) where
-    (:\)  :: Sig sig => Name -> Eta sym sig -> Eta sym (a ':-> sig)
+    (:\)  :: Sig a => Name -> Eta sym sig -> Eta sym (a ':-> sig)
     (:\\) :: Place -> Eta sym sig -> Eta sym ('Put ':=> sig)
     Spine :: Beta sym ('Const a) -> Eta sym ('Const a)
 
