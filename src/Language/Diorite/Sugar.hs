@@ -1,8 +1,13 @@
 module Language.Diorite.Sugar
-    ( Syntactic(..)
+    (
+    -- Syntactic sugaring.
+      Syntactic(..)
     , resugar
     , sugarSym
     ) where
+
+-- Related stuff:
+--   https://emilaxelsson.github.io/documents/axelsson2013using.pdf
 
 import Language.Diorite.Syntax (Signature(..), Sig(..), Name, Beta(..), Eta(..))
 

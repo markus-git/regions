@@ -1,12 +1,16 @@
 module Language.Diorite.Interpretation
-    ( Render(..)
+    (
+    -- Rendering.
+      Render(..)
     , renderBeta
     , renderEta
-    --
+    -- Evaluation.
     , Denotation
     ) where
 
 import Language.Diorite.Syntax (Name, Put(..), Signature(..), Beta(..), Eta(..))
+
+import qualified Control.Applicative as A
 
 --------------------------------------------------------------------------------
 -- * Rendering.
@@ -19,17 +23,20 @@ class Render sym where
     renderArgs []   s = renderSym s
     renderArgs args s = "(" ++ unwords (renderSym s : args) ++ ")"
 
+instance Show a => Render (A.Const a) where
+    renderSym = show . A.getConst
+
 -- | Render a 'Beta' tree as concrete syntax.
 renderBeta :: Render sym => [String] -> Beta sym a -> String
-renderBeta _    (Var n)  = show n
+renderBeta args (Var n)  = renderArgs args (A.Const ('v' : show n))
 renderBeta args (Sym s)  = renderArgs args s
 renderBeta args (s :$ e) = renderBeta (renderEta e : args) s
-renderBeta args (s :# p) = renderBeta (("<" ++ show p ++ ">") : args) s
+renderBeta args (s :# p) = renderBeta (('r' : show p) : args) s
 
 -- | Render an 'Eta' spine as concrete syntax.
 renderEta :: Render sym => Eta sym a -> String
-renderEta (n :\ e)  = "(\\" ++ show n ++ ". " ++ renderEta e ++ ")"
-renderEta (p :\\ e) = "(/\\" ++ show p ++ ". " ++ renderEta e ++ ")"
+renderEta (n :\ e)  = "(\\" ++ ('v' : show n) ++ ". " ++ renderEta e ++ ")"
+renderEta (p :\\ e) = "(/\\" ++ ('r' : show p) ++ ". " ++ renderEta e ++ ")"
 renderEta (Spine b) = renderBeta [] b
 
 instance Render sym => Show (Beta sym a) where

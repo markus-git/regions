@@ -1,10 +1,5 @@
 {-# OPTIONS_GHC -Wall #-}
 
--- Related stuff:
---   https://github.com/Feldspar/feldspar-language
---   https://github.com/emilaxelsson/syntactic
---   https://github.com/emilaxelsson/lambda-edsl
-
 module Language.Diorite.Syntax
     (
     -- Signatures.
@@ -21,11 +16,17 @@ module Language.Diorite.Syntax
     , AST
     , ASTF
     , Sym(..)
+    -- Open symbol domains.
+    , smartSym
     -- Utilities.
     , Empty
     , Ex(..)
     , liftE
     ) where
+
+-- Related stuff:
+--   https://github.com/emilaxelsson/syntactic
+--   https://github.com/emilaxelsson/lambda-edsl
 
 import Data.Typeable (Typeable)
 
@@ -113,7 +114,41 @@ instance Sym SigRep where
 -- ** Open symbol domains.
 --------------------------------------------------------------------------------
 
--- todo.
+-- | Maps a symbol to its corresponding "smart" constructor.
+type family SmartBeta (sym :: Signature * -> *) (sig :: Signature *)
+type instance SmartBeta sym ('Const a)      = Beta sym ('Const a)
+--type instance SmartBeta sym (a ':-> sig)  = ... -> SmartBeta sym sig
+type instance SmartBeta sym ('Put ':=> sig) = Region -> SmartBeta sym sig
+
+-- | Maps a "smart" constructor to its corresponding symbol's signature.
+type family SmartSig f :: Signature *
+type instance SmartSig (ASTF sym a)         = 'Const a
+--type instance SmartSig (... -> f)         = ... ':-> SmartSig f
+type instance SmartSig (Region -> f)        = 'Put ':=> SmartSig f
+
+-- | Returns the resulting 'sym' of a "smart" constructor.
+type family SmartSym f :: Signature * -> *
+type instance SmartSym (AST sym a)          = sym
+--type instance SmartSym (... -> f)         = SmartSym f
+type instance SmartSym (Region -> f)        = SmartSym f
+
+-- | Make a "smart" constructor for a symbol.
+--
+-- > smartSym :: sym (Const a :-> (Const a :-> Const b) :-> Const b)
+-- >          -> (ASTF sym a -> (ASTF sym a -> ASTF sym b) -> ASTF sym b)
+smartSym :: forall sym sig f
+    .  ( Sig sig
+       , f   ~ SmartBeta sym sig
+       , sig ~ SmartSig f
+       , sym ~ SmartSym f
+       )
+    => sym sig -> f
+smartSym sym = smartBeta (signature :: SigRep sig) (Sym sym)
+  where
+    smartBeta :: forall a . SigRep a -> Beta sym a -> SmartBeta sym a
+    smartBeta (SigConst)    ast = ast
+    smartBeta (SigPart _ _) _   = undefined
+    smartBeta (SigPred sig) ast = \r -> smartBeta sig (ast :# r)
 
 --------------------------------------------------------------------------------
 -- ** Utils.

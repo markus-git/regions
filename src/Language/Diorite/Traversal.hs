@@ -1,14 +1,13 @@
 {-# OPTIONS_GHC -Wall #-}
 
 module Language.Diorite.Traversal
-    ( Result
+    (
+    -- "Pattern matching".
+      Result
     , Args(..)
-    -- 
     , match
     , constMatch
     , transMatch
-    --
-    , envMatch
     ) where
 
 import Language.Diorite.Syntax
@@ -65,7 +64,7 @@ constMatch :: forall sym a b
 constMatch f g = A.getConst . match (\s -> A.Const . f s) (\s -> A.Const . g s)
 
 newtype WrapBeta c sym sig = WrapBeta { unWrapBeta :: c (Beta sym sig) }
-  -- note: Only used in the definition of 'transMatch'
+  -- note: Only used in the definition of 'transMatch'.
 
 -- | A version of 'match' where the result is a transformed syntax tree, wrapped
 --   in some type constructor.
@@ -76,13 +75,6 @@ transMatch :: forall sym sym' c a
             Name -> Args (Eta sym) sig -> c (Beta sym' ('Const a)))
     -> Beta sym ('Const a) -> c (Beta sym' ('Const a))
 transMatch f g = unWrapBeta . match (\s -> WrapBeta . f s) (\s -> WrapBeta . g s)
-
---------------------------------------------------------------------------------
--- ** Traversal with environment.
---------------------------------------------------------------------------------
-
-envMatch :: forall sym a c .  Beta sym ('Const a) -> c ('Const a)
-envMatch = undefined
 
 --------------------------------------------------------------------------------
 -- Fin.

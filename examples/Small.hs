@@ -6,15 +6,12 @@ import Language.Diorite
 import Language.Diorite.Region
 
 import Data.List (partition)
---import Data.Dynamic (Dynamic, toDyn, fromDynamic)
 import Data.Proxy (Proxy(..))
 import Data.Typeable (Typeable, eqT)
 import Data.Type.Equality ((:~:)(..))
 import Data.Constraint (Dict(..))
 
---import Control.Monad.Reader (ReaderT)
 import Control.Monad.State (State)
---import qualified Control.Monad.Reader as R (ask, local, runReaderT)
 import qualified Control.Monad.State as S (get, put, evalState)
 
 --------------------------------------------------------------------------------
@@ -49,14 +46,14 @@ data TExp a where
         ':-> ('Const Int ':-> 'Const Int)
         ':-> 'Const Int
         )
-  -- todo: Second 'a' should maybe be wrapped in a 'Put' as well.
     TLoc :: Typeable a => Place -> TExp ('Const a ':-> 'Const a)
+  -- todo: The number of 'Put':s in 'TLet' really depends its shared value.
 
 instance Render TExp where
     renderSym (TInt i) = renderSym (SInt i)
     renderSym (TAdd)   = renderSym (SAdd)
     renderSym (TLet)   = renderSym (SLet)
-    renderSym (TLoc p) = "letr " ++ show p ++ " in"
+    renderSym (TLoc p) = "rgn " ++ ('r':show p) ++ " in"
 
 instance Sym TExp where
     symbol (TInt _) = signature
@@ -137,7 +134,7 @@ inferVar :: forall sig a . (a ~ Result sig, Sig sig)
 inferVar env name as = case lookup name env of
     Nothing -> error $ "Variable " ++ show name ++ " not found."
     Just (Ex t) -> case witErased t (signature :: SigRep sig) of
-        Nothing -> error "E2"
+        Nothing -> error $ "Signature mis-match for variable " ++ show name ++ "."
         Just (Erased Refl) | Dict <- witSig t ->
             reduceBeta env (Var name) t as
 
@@ -188,18 +185,14 @@ inferSym env (SLet) (Spine a :* (v :\ Spine f) :* Nil) = do
     (sa, ca, ta, a') <- inferM env a
     let (ca_p,ca_y) = partitionBound ca env
     let (x, rho) = case ca_y of
-          [(x,y)] -> (x,  (v, Ex (TypePred y  (TypeConst ta)))) -- todo.
+          [(x, y)] -> (x, (v, Ex (TypePred y (TypeConst ta)))) -- todo.
     (sf, cf, tf, f') <- inferM (rho : sub sa env) f
     p <- newName
     r <- newName
-    return $ ( sub sf ((p,r) : ca_p) ++ cf
-             , sf @@ sa
+    return $ ( sf @@ sa
+             , sub sf ((p,r) : ca_p) ++ cf
              , tf
              , Sym TLet :# p :$ (x :\\ Spine a') :$ (v :\ Spine f'))
-  -- todo: The number of 'Put':s on 'v' depends on 'a'.
-
-signatureOf :: Eta sym (a ':-> 'Const b) -> SigRep a
-signatureOf (v :\ Spine _) = signature
 
 --------------------------------------------------------------------------------
 
@@ -223,7 +216,7 @@ inferM :: forall a . Env -> Beta SExp ('Const a)
 inferM env = constMatch (inferRgn env) (inferVar env)
 
 infer :: Beta SExp ('Const a) -> Beta TExp ('Const a)
-infer e = let (_,_,_,b) = runM (inferM [] e) in b
+infer e = let (_,p,_,b) = runM (inferM [] e) in b
   -- todo: Don't discard P.
 
 --------------------------------------------------------------------------------
