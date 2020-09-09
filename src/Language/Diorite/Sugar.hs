@@ -9,7 +9,8 @@ module Language.Diorite.Sugar
 -- Related stuff:
 --   https://emilaxelsson.github.io/documents/axelsson2013using.pdf
 
-import Language.Diorite.Syntax (Signature(..), Sig(..), Name, Beta(..), Eta(..))
+import Language.Diorite.Syntax
+    (Signature(..), Sig(..), Name, Beta(..), Eta(..), lam)
 
 --------------------------------------------------------------------------------
 -- * Syntactic sugaring.
@@ -47,25 +48,6 @@ instance Syntactic (Eta sym ('Const a)) where
     type Internal (Eta sym ('Const a)) = 'Const a
     sugar   = Spine
     desugar = id
-
--- | Get the highest name bound for 'Eta' node.
-maxLamEta :: Eta sym a -> Name
-maxLamEta (n :\ _)  = n
-maxLamEta (_ :\\ e) = maxLamEta e
-maxLamEta (Spine b) = maxLamBeta b
-
--- | Get the highest name bound for 'Beta' node.
-maxLamBeta :: Beta sym a -> Name
-maxLamBeta (b :$ e) = maxLamBeta b `Prelude.max` maxLamEta e
-maxLamBeta (b :# _) = maxLamBeta b
-maxLamBeta _        = 0
-
--- | Interface for variable binding.
-lam :: Sig a => (Beta sym a -> Eta sym b) -> Eta sym (a ':-> b)
-lam f = v :\ body
-  where
-    v    = maxLamEta body + 1
-    body = f $ Var v
 
 -- | Syntactic functions.
 instance

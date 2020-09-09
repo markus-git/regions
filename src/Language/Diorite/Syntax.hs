@@ -16,6 +16,7 @@ module Language.Diorite.Syntax
     , AST
     , ASTF
     , Sym(..)
+    , lam
     -- Open symbol domains.
     , smartSym
     -- Utilities.
@@ -82,7 +83,7 @@ data Beta sym (sig :: Signature *) where
     Sym  :: sym sig -> Beta sym sig
     (:$) :: Beta sym (a ':-> sig) -> Eta sym a -> Beta sym sig
     (:#) :: Beta sym ('Put ':=> sig) -> Place -> Beta sym sig
-  -- todo: Have Haskell handle regions a la "Typing Dynamic Typing"(?).
+  -- todo: Have Haskell handle region inference a la "Typing Dynamic Typing"(?).
 
 data Eta sym (sig :: Signature *) where
     (:\)  :: Sig a => Name -> Eta sym sig -> Eta sym (a ':-> sig)
@@ -99,8 +100,6 @@ type AST sym sig = Beta sym sig
 -- | Fully applied AST (constant value).
 type ASTF sym sig = Beta sym ('Const sig)
 
---------------------------------------------------------------------------------
-
 -- | Symbol with a valid signature.
 class Sym sym where
     symbol :: sym sig -> SigRep sig
@@ -108,7 +107,24 @@ class Sym sym where
 instance Sym SigRep where
     symbol = id
 
--- todo.
+-- | Get the highest name bound for 'Eta' node.
+maxLamEta :: Eta sym a -> Name
+maxLamEta (n :\ _)  = n
+maxLamEta (_ :\\ e) = maxLamEta e
+maxLamEta (Spine b) = maxLamBeta b
+
+-- | Get the highest name bound for 'Beta' node.
+maxLamBeta :: Beta sym a -> Name
+maxLamBeta (b :$ e) = maxLamBeta b `Prelude.max` maxLamEta e
+maxLamBeta (b :# _) = maxLamBeta b
+maxLamBeta _        = 0
+
+-- | Interface for variable binding.
+lam :: Sig a => (Beta sym a -> Eta sym b) -> Eta sym (a ':-> b)
+lam f = v :\ body
+  where
+    v    = maxLamEta body + 1
+    body = f $ Var v
 
 --------------------------------------------------------------------------------
 -- ** Open symbol domains.
@@ -117,20 +133,20 @@ instance Sym SigRep where
 -- | Maps a symbol to its corresponding "smart" constructor.
 type family SmartBeta (sym :: Signature * -> *) (sig :: Signature *)
 type instance SmartBeta sym ('Const a)      = Beta sym ('Const a)
---type instance SmartBeta sym (a ':-> sig)  = ... -> SmartBeta sym sig
-type instance SmartBeta sym ('Put ':=> sig) = Region -> SmartBeta sym sig
+type instance SmartBeta sym (a ':-> sig)    = SmartBeta sym a -> SmartBeta sym sig
+-- type instance SmartBeta sym ('Put ':=> sig) = ... => SmartBeta sym sig
 
 -- | Maps a "smart" constructor to its corresponding symbol's signature.
 type family SmartSig f :: Signature *
-type instance SmartSig (ASTF sym a)         = 'Const a
---type instance SmartSig (... -> f)         = ... ':-> SmartSig f
-type instance SmartSig (Region -> f)        = 'Put ':=> SmartSig f
+type instance SmartSig (Beta sym a) = a
+type instance SmartSig (a -> f)     = SmartSig a ':-> SmartSig f
+-- type instance SmartSig (... => f) = 'Put ':=> SmartSig f
 
 -- | Returns the resulting 'sym' of a "smart" constructor.
 type family SmartSym f :: Signature * -> *
-type instance SmartSym (AST sym a)          = sym
---type instance SmartSym (... -> f)         = SmartSym f
-type instance SmartSym (Region -> f)        = SmartSym f
+type instance SmartSym (Beta sym a) = sym
+type instance SmartSym (a -> f)     = SmartSym f
+-- type instance SmartSym (... => f) = SmartSym f
 
 -- | Make a "smart" constructor for a symbol.
 --
@@ -146,9 +162,14 @@ smartSym :: forall sym sig f
 smartSym sym = smartBeta (signature :: SigRep sig) (Sym sym)
   where
     smartBeta :: forall a . SigRep a -> Beta sym a -> SmartBeta sym a
-    smartBeta (SigConst)    ast = ast
-    smartBeta (SigPart _ _) _   = undefined
-    smartBeta (SigPred sig) ast = \r -> smartBeta sig (ast :# r)
+    smartBeta (SigConst)      ast = ast
+    smartBeta (SigPart a sig) ast = \f -> smartBeta sig (ast :$ smartEta a f)
+  -- smartBeta (SigPred sig) ast = \r -> smartBeta sig (ast :# r)
+
+    smartEta :: forall a . SigRep a -> SmartBeta sym a -> Eta sym a
+    smartEta (SigConst)      f = Spine f
+    smartEta (SigPart a sig) f = lam (\b -> smartEta sig (f b))
+  -- smartEta (SigPred sig) f = ...
 
 --------------------------------------------------------------------------------
 -- ** Utils.
