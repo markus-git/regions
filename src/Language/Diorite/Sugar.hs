@@ -1,6 +1,6 @@
 module Language.Diorite.Sugar
     (
-    -- Syntactic sugaring.
+    -- * Syntactic sugaring.
       Syntactic(..)
     , resugar
     , sugarSym

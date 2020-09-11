@@ -1,10 +1,10 @@
 module Language.Diorite.Interpretation
     (
-    -- Rendering.
+    -- * Rendering.
       Render(..)
     , renderBeta
     , renderEta
-    -- Evaluation.
+    -- * Evaluation.
     , Denotation
     ) where
 

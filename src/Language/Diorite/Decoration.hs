@@ -1,7 +1,9 @@
 {-# OPTIONS_GHC -Wall #-}
 
 module Language.Diorite.Decoration
-    ( (:&:)(..)
+    (
+    -- * Symbol decorations.
+      (:&:)(..)
     ) where
 
 import Language.Diorite.Syntax (Sym(..))

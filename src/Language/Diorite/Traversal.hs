@@ -2,7 +2,7 @@
 
 module Language.Diorite.Traversal
     (
-    -- "Pattern matching".
+    -- * "Pattern matching" on ASTs.
       Result
     , Args(..)
     , match

@@ -3,7 +3,7 @@
 module Small where
 
 import Language.Diorite
-import Language.Diorite.Region
+--import Language.Diorite.Region
 
 import Data.List (partition)
 import Data.Proxy (Proxy(..))
@@ -15,7 +15,7 @@ import Control.Monad.State (State)
 import qualified Control.Monad.State as S (get, put, evalState)
 
 --------------------------------------------------------------------------------
--- * Example.
+-- * Source language.
 --------------------------------------------------------------------------------
 
 -- | Source language.
@@ -34,6 +34,31 @@ instance Sym SExp where
     symbol (SAdd)   = signature
     symbol (SLet)   = signature
 
+intS :: Int -> Beta SExp ('Const Int)
+intS = smartSym' . SInt
+
+addS :: Beta SExp ('Const Int) -> Beta SExp ('Const Int) -> Beta SExp ('Const Int)
+addS = smartSym' SAdd
+
+letS :: Beta SExp ('Const Int)
+     -> (Beta SExp ('Const Int) -> Beta SExp ('Const Int))
+     -> Beta SExp ('Const Int)
+letS = smartSym' SLet
+
+--------------------------------------------------------------------------------
+-- ** Small examples.
+
+one :: Beta SExp ('Const Int)
+one = intS 1
+
+test_add :: Beta SExp ('Const Int)
+test_add = one `addS` (one `addS` one)
+
+test_share :: Beta SExp ('Const Int)
+test_share = letS one (\v -> one `addS` v)
+
+--------------------------------------------------------------------------------
+-- * Target language.
 --------------------------------------------------------------------------------
 
 -- | Target language.
@@ -47,7 +72,7 @@ data TExp a where
         ':-> 'Const Int
         )
     TLoc :: Typeable a => Place -> TExp ('Const a ':-> 'Const a)
-  -- todo: The number of 'Put':s in 'TLet' really depends its shared value.
+  -- todo: The number of 'Put':s in 'TLet' really depend on its shared value.
 
 instance Render TExp where
     renderSym (TInt i) = renderSym (SInt i)
@@ -62,7 +87,20 @@ instance Sym TExp where
     symbol (TLoc _) = signature
 
 --------------------------------------------------------------------------------
--- Infer.
+-- * Region Inference.
+--------------------------------------------------------------------------------
+
+-- | Erasure of any "Put" predicates of a symbol's signature.
+type family Erasure a where
+    Erasure ('Const a)    = 'Const a
+    Erasure (a ':-> b)    = Erasure a ':-> Erasure b
+    Erasure ('Put ':=> a) = Erasure a
+
+-- | Witness of equality under "Erasure" of second signature.
+newtype sig :~~: sig' = Erased (sig :~: Erasure sig')
+
+infixr :~~:
+
 --------------------------------------------------------------------------------
 
 data Prim a where
@@ -78,19 +116,14 @@ primTEq :: Typeable a => Proxy a -> Prim b -> Maybe (a :~: b)
 primTEq _ p | Dict <- primTyp p = eqT
 
 data TypeRep (sig :: Signature *) where
-    TypeConst :: Prim a -> TypeRep ('Const a)
+    TypeConst :: Typeable a => Prim a -> TypeRep ('Const a)
     TypePart  :: Region -> TypeRep a -> TypeRep sig -> TypeRep (a ':-> sig)
     TypePred  :: Region -> TypeRep sig -> TypeRep ('Put ':=> sig)
 
 instance Sym TypeRep where
-    symbol (TypeConst p) | Dict <- primTyp p = SigConst
+    symbol (TypeConst _) = SigConst
     symbol (TypePart _ a b) = SigPart (symbol a) (symbol b)
     symbol (TypePred _ a) = SigPred (symbol a)
-
-result :: a ~ Result sig => TypeRep sig -> Prim a
-result (TypeConst p) = p
-result (TypePart _ _ a) = result a
-result (TypePred _ a) = result a
 
 --------------------------------------------------------------------------------
 
@@ -117,7 +150,7 @@ reduceEta :: forall sig rsig a . (sig ~ Erasure rsig)
 reduceEta env (Spine beta) (TypeConst p) | Dict <- primTyp p = do
     (s, c, _, beta') <- inferM env beta
     return (s, c, Spine beta')
-reduceEta env (v :\ eta) (TypePart r a sig) | Dict <- witSig a = do
+reduceEta env (v :\ eta) (TypePart r a sig) | Dict <- witType a = do
     (s, c, eta') <- reduceEta env eta sig
     return (s, c, v :\ eta')
 reduceEta env eta (TypePred r sig) = do
@@ -135,7 +168,7 @@ inferVar env name as = case lookup name env of
     Nothing -> error $ "Variable " ++ show name ++ " not found."
     Just (Ex t) -> case witErased t (signature :: SigRep sig) of
         Nothing -> error $ "Signature mis-match for variable " ++ show name ++ "."
-        Just (Erased Refl) | Dict <- witSig t ->
+        Just (Erased Refl) | Dict <- witType t ->
             reduceBeta env (Var name) t as
 
 witErased :: forall sig rsig
@@ -154,10 +187,10 @@ witErased (TypePred _ a) sig
     = Just (Erased Refl)
 witErased _ _ = Nothing
 
-witSig :: forall sig . TypeRep sig -> Dict (Sig sig)
-witSig (TypeConst p) | Dict <- primTyp p = Dict
-witSig (TypePart _ a b) | Dict <- witSig a, Dict <- witSig b = Dict
-witSig (TypePred _ a) | Dict <- witSig a = Dict
+witType :: forall sig . TypeRep sig -> Dict (Sig sig)
+witType (TypeConst p) | Dict <- primTyp p = Dict
+witType (TypePart _ a b) | Dict <- witType a, Dict <- witType b = Dict
+witType (TypePred _ a) | Dict <- witType a = Dict
 
 --------------------------------------------------------------------------------
 
@@ -218,33 +251,6 @@ inferM env = constMatch (inferRgn env) (inferVar env)
 infer :: Beta SExp ('Const a) -> Beta TExp ('Const a)
 infer e = let (_,p,_,b) = runM (inferM [] e) in b
   -- todo: Don't discard P.
-
---------------------------------------------------------------------------------
--- Small examples.
---------------------------------------------------------------------------------
-
-var :: Sig a => Name -> Beta SExp a
-var a = Var a
-
-one :: Beta SExp ('Const Int)
-one = Sym (SInt 1)
-
-add :: Beta SExp ('Const Int) -> Beta SExp ('Const Int) -> Beta SExp ('Const Int)
-add a b = Sym SAdd :$ (Spine a) :$ (Spine b)
-
-share :: Beta SExp ('Const Int) -> Eta SExp ('Const Int ':-> 'Const Int) -> Beta SExp ('Const Int)
-share a f = Sym SLet :$ (Spine a) :$ f
-
---------------------------------------------------------------------------------
-
-test_add :: Beta SExp ('Const Int)
-test_add = one `add` (one `add` one)
-
-test_lam :: Eta SExp ('Const Int ':-> 'Const Int)
-test_lam = 1 :\ (Spine (add one (var 1)))
-
-test_share :: Beta SExp ('Const Int)
-test_share = share one test_lam
 
 --------------------------------------------------------------------------------
 -- Extra stuff needed for inference.
@@ -335,6 +341,15 @@ instance Substitute Context where
 
 (@@) :: Sub -> Sub -> Sub
 (@@) new old = [(u, sub new t) | (u, t) <- old] ++ new
+
+--------------------------------------------------------------------------------
+
+-- | Existential quantification.
+data Ex e where
+    Ex :: e a -> Ex e
+
+liftE :: (forall a . e a -> b) -> Ex e -> b
+liftE f (Ex a) = f a
 
 --------------------------------------------------------------------------------
 -- Fin.

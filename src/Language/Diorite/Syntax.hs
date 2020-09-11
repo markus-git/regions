@@ -1,13 +1,18 @@
 {-# OPTIONS_GHC -Wall #-}
 
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveTraversable #-}
+
 module Language.Diorite.Syntax
     (
-    -- Signatures.
+    -- * Signatures.
       Put(..)
     , Signature(..)
     , SigRep(..)
     , Sig(..)
-    -- Abstract syntax trees.
+    , witSig
+    -- * Abstract syntax trees.
     , Name
     , Place
     , Region
@@ -17,18 +22,27 @@ module Language.Diorite.Syntax
     , ASTF
     , Sym(..)
     , lam
-    -- Open symbol domains.
-    , smartSym
-    -- Utilities.
+    -- * "Smart" constructors.
+    , SmartBeta
+    , SmartEta
+    , SmartSig
+    , SmartSym
+    , smartSym'
+    -- * Open symbol domains.
     , Empty
+    , (:+:)(..)
+    , Project(..)
+    , (:<:)(..)
+    , smartSym
+    -- * Utilities.
     , Ex(..)
     , liftE
     ) where
 
 -- Related stuff:
---   https://github.com/emilaxelsson/syntactic
---   https://github.com/emilaxelsson/lambda-edsl
+--   https://emilaxelsson.github.io/documents/axelsson2012generic.pdf
 
+import Data.Constraint (Dict(..))
 import Data.Typeable (Typeable)
 
 --------------------------------------------------------------------------------
@@ -64,6 +78,12 @@ instance (Sig a, Sig sig) => Sig (a ':-> sig) where
 instance Sig sig => Sig ('Put ':=> sig) where
     signature = SigPred signature
 
+-- | Witness ...
+witSig :: SigRep a -> Dict (Sig a)
+witSig (SigConst)    = Dict
+witSig (SigPart a b) | Dict <- witSig a, Dict <- witSig b = Dict
+witSig (SigPred a)   | Dict <- witSig a = Dict
+
 --------------------------------------------------------------------------------
 -- * Abstract syntax tree.
 --------------------------------------------------------------------------------
@@ -84,6 +104,8 @@ data Beta sym (sig :: Signature *) where
     (:$) :: Beta sym (a ':-> sig) -> Eta sym a -> Beta sym sig
     (:#) :: Beta sym ('Put ':=> sig) -> Place -> Beta sym sig
   -- todo: Have Haskell handle region inference a la "Typing Dynamic Typing"(?).
+  --         (:\\) :: HasPut c e => sym (c => r) -> e -> sym r
+  --         ... or something ...
 
 data Eta sym (sig :: Signature *) where
     (:\)  :: Sig a => Name -> Eta sym sig -> Eta sym (a ':-> sig)
@@ -127,14 +149,19 @@ lam f = v :\ body
     body = f $ Var v
 
 --------------------------------------------------------------------------------
--- ** Open symbol domains.
+-- ** "Smart" constructors.
 --------------------------------------------------------------------------------
 
 -- | Maps a symbol to its corresponding "smart" constructor.
 type family SmartBeta (sym :: Signature * -> *) (sig :: Signature *)
 type instance SmartBeta sym ('Const a)      = Beta sym ('Const a)
-type instance SmartBeta sym (a ':-> sig)    = SmartBeta sym a -> SmartBeta sym sig
+type instance SmartBeta sym (a ':-> sig)    = SmartEta sym a -> SmartBeta sym sig
 -- type instance SmartBeta sym ('Put ':=> sig) = ... => SmartBeta sym sig
+
+-- | Maps a function to its corresponding "
+type family SmartEta (sym :: Signature * -> *) (sig :: Signature *)
+type instance SmartEta sym ('Const a)   = Beta sym ('Const a)
+type instance SmartEta sym (a ':-> sig) = Beta sym a -> SmartEta sym sig
 
 -- | Maps a "smart" constructor to its corresponding symbol's signature.
 type family SmartSig f :: Signature *
@@ -149,34 +176,95 @@ type instance SmartSym (a -> f)     = SmartSym f
 -- type instance SmartSym (... => f) = SmartSym f
 
 -- | Make a "smart" constructor for a symbol.
---
--- > smartSym :: sym (Const a :-> (Const a :-> Const b) :-> Const b)
--- >          -> (ASTF sym a -> (ASTF sym a -> ASTF sym b) -> ASTF sym b)
-smartSym :: forall sym sig f
+smartSym' :: forall sym sig f
     .  ( Sig sig
        , f   ~ SmartBeta sym sig
        , sig ~ SmartSig f
        , sym ~ SmartSym f
        )
     => sym sig -> f
-smartSym sym = smartBeta (signature :: SigRep sig) (Sym sym)
+smartSym' sym = smartBeta (signature :: SigRep sig) (Sym sym)
   where
     smartBeta :: forall a . SigRep a -> Beta sym a -> SmartBeta sym a
     smartBeta (SigConst)      ast = ast
     smartBeta (SigPart a sig) ast = \f -> smartBeta sig (ast :$ smartEta a f)
-  -- smartBeta (SigPred sig) ast = \r -> smartBeta sig (ast :# r)
+    smartBeta (SigPred _)     _   = undefined
 
-    smartEta :: forall a . SigRep a -> SmartBeta sym a -> Eta sym a
+    smartEta :: forall a . SigRep a -> SmartEta sym a -> Eta sym a
     smartEta (SigConst)      f = Spine f
-    smartEta (SigPart a sig) f = lam (\b -> smartEta sig (f b))
-  -- smartEta (SigPred sig) f = ...
+    smartEta (SigPart a sig) f | Dict <- witSig a = lam (smartEta sig . f)
+    smartEta (SigPred _)     _ = undefined
+
+--------------------------------------------------------------------------------
+-- * Open symbol domains.
+--------------------------------------------------------------------------------
+
+-- | Empty symbol type.
+data Empty :: * -> *
+
+-- | Direct sum of two symbol domains.
+data (sym1 :+: sym2) sig
+  where
+    InjL :: sym1 a -> (sym1 :+: sym2) a
+    InjR :: sym2 a -> (sym1 :+: sym2) a
+  deriving (Functor, Foldable, Traversable)
+
+infixr :+:
+
+instance (Sym sym1, Sym sym2) => Sym (sym1 :+: sym2)
+  where
+    symbol (InjL s) = symbol s
+    symbol (InjR s) = symbol s
+
+-- | Partial symbol projection.
+class Project sub sup where
+    prj :: sup a -> Maybe (sub a)
+
+instance Project sub sup => Project sub (Beta sup) where
+    prj (Sym s) = prj s
+    prj _       = Nothing
+
+instance {-# OVERLAPS #-} Project sym sym where
+    prj = Just
+
+instance {-# OVERLAPS #-} Project sym1 (sym1 :+: sym2) where
+    prj (InjL a) = Just a
+    prj _        = Nothing
+
+instance {-# OVERLAPS #-} Project sym1 sym3 => Project sym1 (sym2 :+: sym3) where
+    prj (InjR a) = prj a
+    prj _        = Nothing
+
+-- | Symbol injection.
+class Project sub sup => sub :<: sup where
+    inj :: sub a -> sup a
+
+instance {-# OVERLAPS #-} (sub :<: sup) => (sub :<: Beta sup) where
+    inj = Sym . inj
+
+instance {-# OVERLAPS #-} (sym :<: sym) where
+    inj = id
+
+instance {-# OVERLAPS #-} (sym1 :<: (sym1 :+: sym2)) where
+    inj = InjL
+
+instance {-# OVERLAPS #-} (sym1 :<: sym3) => (sym1 :<: (sym2 :+: sym3)) where
+    inj = InjR . inj
+
+-- | Make a "smart" constructor for a symbol.
+smartSym :: forall sup sub sig f
+    .  ( Sig sig
+       , f   ~ SmartBeta sup sig
+       , sig ~ SmartSig f
+       , sup ~ SmartSym f
+       , sub :<: sup
+       )
+    => sub sig -> f
+smartSym = smartSym' . inj
 
 --------------------------------------------------------------------------------
 -- ** Utils.
 --------------------------------------------------------------------------------
-
--- | Empty symbol type
-data Empty :: * -> *
 
 -- | Existential quantification.
 data Ex e where
