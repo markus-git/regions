@@ -103,14 +103,14 @@ data Beta sym (sig :: Signature *) where
     Sym  :: sym sig -> Beta sym sig
     (:$) :: Beta sym (a ':-> sig) -> Eta sym a -> Beta sym sig
     (:#) :: Beta sym ('Put ':=> sig) -> Place -> Beta sym sig
-  -- todo: Have Haskell handle region inference a la "Typing Dynamic Typing"(?).
-  --         (:\\) :: HasPut c e => sym (c => r) -> e -> sym r
-  --         ... or something ...
+  -- todo: (:#) :: ... Puts r p => sym ('Put r ':=> sig) -> Place p -> sym sig
+  --       class Puts r p | p -> r where locate :: Place p -> Dict r
 
 data Eta sym (sig :: Signature *) where
     (:\)  :: Sig a => Name -> Eta sym sig -> Eta sym (a ':-> sig)
     (:\\) :: Place -> Eta sym sig -> Eta sym ('Put ':=> sig)
     Spine :: Beta sym ('Const a) -> Eta sym ('Const a)
+  -- todo: (:\\) :: ... Place p -> sym sig -> sym ('Put r ':=> sig)
 
 infixl 1 :$, :#
 
