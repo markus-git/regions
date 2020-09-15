@@ -16,7 +16,8 @@ import Language.Diorite.Decoration
 import Language.Diorite.Interpretation (Render(..))
 import Language.Diorite.Traversal (Args(..), Result(..), constMatch)
 
-import Data.Constraint (Constraint, Dict(..))
+import Data.Maybe (fromMaybe)
+import Data.Constraint (Constraint, Dict(..), withDict)
 import Data.Proxy (Proxy(..))
 import Data.Type.Equality ((:~:)(..))
 import Data.Typeable (Typeable, eqT)
@@ -24,6 +25,9 @@ import qualified Data.List as L (partition)
 
 import Control.Monad.State (State)
 import qualified Control.Monad.State as S (get, put, evalState)
+
+import Prelude hiding (lookup)
+import qualified Prelude as P (lookup)
 
 --------------------------------------------------------------------------------
 -- * ...
@@ -94,7 +98,41 @@ witSigT = witSig . symbol
 -- * Region inference.
 --------------------------------------------------------------------------------
 
--- | ... instantiate/apply.
+instantiate :: forall sup sub sig r a
+    .  ( a ~ Result sig
+       , Sig sig
+       , Fresh (Prim sup)
+       , Substitute (Prim sup)
+       )
+    => Store (Prim sup)
+    -> Name
+    -> Args (Eta sub) sig
+    -> M (Sub, Context, Prim sup a, Beta sup ('Const a))
+instantiate env name as = withType (\t -> undefined)
+  where
+    withType :: forall r
+        .  (forall rig . sig ~ Erasure rig
+                => TypeRep (Prim sup) rig -> M r
+           )
+        -> M r
+    withType f = fromMaybe (error $ "Variable " ++ show name ++ " not found.") $
+      do (Ex t)        <- P.lookup name env
+         (Erased Refl) <- eqET (signature :: SigRep sig) (symbol t)
+         withDict (witSigT t) (return $ fresh t >>= f)
+
+    reduce :: forall s r . (a ~ Result s, s ~ Erasure r)
+        => Store (Prim sup)
+        -> Beta sup r
+        -> TypeRep (Prim sup) r
+        -> Args (Eta sub) s
+        -> M (Sub, Context, Prim sup a, Beta sup ('Const a))
+    reduce env beta (TypeConst p) (Nil) = do
+        return ([], [], p, beta)
+    reduce env beta (TypePart a b) (eta :* as) = do
+        undefined
+
+--------------------------------------------------------------------------------
+
 reduceBeta :: forall sup sub sig rsig r a
     .  ( a   ~ Result sig
        , sig ~ Erasure rsig
@@ -116,7 +154,6 @@ reduceBeta env beta (TypePred r a) as = do
     (s, c, t, beta') <- reduceBeta env (beta :# p) a as
     return (s, (p, r) : c, t, beta')
 
--- | ... recurse/abstract.
 reduceEta :: forall sup sub sig rsig a
     .  (sig ~ Erasure rsig)
     => Store (Prim sup)
@@ -145,7 +182,7 @@ inferVar :: forall sup sub sig r a
     -> Name
     -> Args (Eta sub) sig
     -> M (Sub, Context, Prim sup a, Beta sup ('Const a))
-inferVar env name as = case lookup name env of
+inferVar env name as = case P.lookup name env of
     Nothing -> error ("Variable " ++ show name ++ " not found.")
     Just (Ex t) -> case eqET (signature :: SigRep sig) (symbol t) of
       Nothing -> error ("Variable " ++ show name ++ " type mismatch.")
@@ -237,6 +274,14 @@ freeL :: Free r => Context -> Store r -> r a -> (Context, Context)
 freeL ctxt s p = let rs = freeS s ++ free p in
     L.partition (not . flip elem rs . snd) ctxt
 
+class Fresh f where
+    fresh :: f a -> M (f a)
+
+instance Fresh r => Fresh (TypeRep r) where
+    fresh (TypeConst p)  = TypeConst <$> fresh p
+    fresh (TypePart a b) = TypePart  <$> fresh a <*> fresh b
+    fresh (TypePred _ a) = TypePred  <$> newName <*> fresh a
+
 class Substitute f where
     sub :: Sub -> f a -> f a
 
@@ -246,7 +291,7 @@ instance Substitute r => Substitute (TypeRep r) where
     sub s (TypePred r a) = TypePred  (subR s r) (sub s a)
 
 subR :: Sub -> Region -> Region
-subR s r | Just r' <- lookup r s = r'
+subR s r | Just r' <- P.lookup r s = r'
          | otherwise = r
 
 subS :: Substitute r => Sub -> Store r -> Store r

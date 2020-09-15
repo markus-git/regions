@@ -63,7 +63,7 @@ data SigRep (sig :: Signature *) where
     SigConst :: Typeable a => SigRep ('Const a)
     SigPart  :: SigRep a -> SigRep sig -> SigRep (a ':-> sig)
     SigPred  :: SigRep sig -> SigRep ('Put ':=> sig)
-  -- todo: 'Typeable' feels arbitrary here but it is needed for rgn. inference.
+  -- todo: 'Typeable' feels arbitrary here but is needed to look up variables.
 
 -- | Valid symbol signatures.
 class Sig sig where
