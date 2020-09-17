@@ -3,12 +3,12 @@
 module Small where
 
 import Language.Diorite
---import Language.Diorite.Region
+import Language.Diorite.Region
 
 import Data.List (partition)
 import Data.Proxy (Proxy(..))
 import Data.Typeable (Typeable, eqT)
-import Data.Type.Equality ((:~:)(..))
+import Data.Type.Equality ((:~:)(..), TestEquality(..))
 import Data.Constraint (Dict(..))
 
 import Control.Monad.State (State)
@@ -87,269 +87,74 @@ instance Sym TExp where
     symbol (TLoc _) = signature
 
 --------------------------------------------------------------------------------
--- * Region Inference.
---------------------------------------------------------------------------------
 
--- | Erasure of any "Put" predicates of a symbol's signature.
-type family Erasure a where
-    Erasure ('Const a)    = 'Const a
-    Erasure (a ':-> b)    = Erasure a ':-> Erasure b
-    Erasure ('Put ':=> a) = Erasure a
+data P a where
+    PInt :: Region -> P Int
 
--- | Witness of equality under "Erasure" of second signature.
-newtype sig :~~: sig' = Erased (sig :~: Erasure sig')
+instance TestEquality P where
+    testEquality (PInt _) (PInt _) = Just Refl
 
-infixr :~~:
+instance Representable P Int where
+    represent = PInt 0
 
---------------------------------------------------------------------------------
-
-data Prim a where
-    PInt :: Region -> Prim Int
-
-primEq :: Prim a -> Prim b -> Maybe (a :~: b)
+primEq :: P a -> P b -> Maybe (a :~: b)
 primEq (PInt _) (PInt _) = Just Refl
 
-primTyp :: Prim a -> Dict (Typeable a)
+primTyp :: P a -> Dict (Typeable a)
 primTyp (PInt _) = Dict
 
-primTEq :: Typeable a => Proxy a -> Prim b -> Maybe (a :~: b)
-primTEq _ p | Dict <- primTyp p = eqT
-
-data TypeRep (sig :: Signature *) where
-    TypeConst :: Typeable a => Prim a -> TypeRep ('Const a)
-    TypePart  :: Region -> TypeRep a -> TypeRep sig -> TypeRep (a ':-> sig)
-    TypePred  :: Region -> TypeRep sig -> TypeRep ('Put ':=> sig)
-
-instance Sym TypeRep where
-    symbol (TypeConst _) = SigConst
-    symbol (TypePart _ a b) = SigPart (symbol a) (symbol b)
-    symbol (TypePred _ a) = SigPred (symbol a)
-
 --------------------------------------------------------------------------------
 
--- instantiate/apply.
-reduceBeta :: forall sig rsig a . (a ~ Result sig, sig ~ Erasure rsig)
-    => Env -> Beta TExp rsig -> TypeRep rsig -> Args (Eta SExp) sig
-    -> M (Sub, Context, Prim a, Beta TExp ('Const a))
-reduceBeta env beta (TypeConst p) (Nil) =
-    return ([], [], p, beta)
-reduceBeta env beta (TypePart r a sig) (eta :* as) = do
-    (s, c, eta') <- reduceEta env eta a
-    (s', c', t, beta') <- reduceBeta (sub s env) (beta :$ eta') sig as
-    return (s' @@ s, c' ++ sub s' c, t, beta')
-reduceBeta env beta (TypePred r sig) as = do
-    p <- newName
-    (s, c, t, beta') <- reduceBeta env (beta :# p) sig as
-    return (s, (p, r) : c, t, beta')
-  -- todo: 'sig ~ Erasure rsig' means that we cannot have ':~' in the args.
+instance Free P where
+    free (PInt r) = [r]
 
--- instantiate/abstract.
-reduceEta :: forall sig rsig a . (sig ~ Erasure rsig)
-    => Env -> Eta SExp sig -> TypeRep rsig
-    -> M (Sub, Context, Eta TExp rsig)
-reduceEta env (Spine beta) (TypeConst p) | Dict <- primTyp p = do
-    (s, c, _, beta') <- inferM env beta
-    return (s, c, Spine beta')
-reduceEta env (v :\ eta) (TypePart r a sig) | Dict <- witType a = do
-    (s, c, eta') <- reduceEta env eta sig
-    return (s, c, v :\ eta')
-reduceEta env eta (TypePred r sig) = do
-    p <- newName
-    (s, c, eta') <- reduceEta env eta sig
-    return (s, (p, r) : c, p :\\ eta')
-  -- todo: same "erasure" issue as 'reduceBeta'.
+instance Substitute P where
+    sub s (PInt r) = PInt (subR s r)
 
---------------------------------------------------------------------------------
+instance Fresh P where
+    fresh (PInt _) = PInt <$> newName
 
-inferVar :: forall sig a . (a ~ Result sig, Sig sig)
-    => Env -> Name -> Args (Eta SExp) sig
-    -> M (Sub, Context, Prim a, Beta TExp ('Const a))
-inferVar env name as = case lookup name env of
-    Nothing -> error $ "Variable " ++ show name ++ " not found."
-    Just (Ex t) -> case witErased t (signature :: SigRep sig) of
-        Nothing -> error $ "Signature mis-match for variable " ++ show name ++ "."
-        Just (Erased Refl) | Dict <- witType t ->
-            reduceBeta env (Var name) t as
+type LExp = TExp :+: Local
 
-witErased :: forall sig rsig
-    .  TypeRep rsig -> SigRep sig -> Maybe (sig :~~: rsig)
-witErased (TypeConst p) sig@(SigConst)
-    | Just Refl <- primTEq (proxyConst sig) p
-    = Just (Erased Refl)
-  where proxyConst :: c ('Const a) -> Proxy a
-        proxyConst _ = Proxy
-witErased (TypePart _ a b) (SigPart c d)
-    | Just (Erased Refl) <- witErased a c
-    , Just (Erased Refl) <- witErased b d
-    = Just (Erased Refl)
-witErased (TypePred _ a) sig
-    | Just (Erased Refl) <- witErased a sig
-    = Just (Erased Refl)
-witErased _ _ = Nothing
-
-witType :: forall sig . TypeRep sig -> Dict (Sig sig)
-witType (TypeConst p) | Dict <- primTyp p = Dict
-witType (TypePart _ a b) | Dict <- witType a, Dict <- witType b = Dict
-witType (TypePred _ a) | Dict <- witType a = Dict
-
---------------------------------------------------------------------------------
+instance Infer SExp LExp where
+    type Prim LExp = P
+    inferSym = inferTExp
 
 -- | ...
-inferSym :: forall sig a . (a ~ Result sig)
-    => Env -> SExp sig -> Args (Eta SExp) sig
-    -> M (Sub, Context, Prim a, Beta TExp ('Const a))
-inferSym env (SInt i) (Nil) = do
+inferTExp :: forall sig a . (a ~ Result sig)
+    => Store P -> SExp sig -> Args (Eta SExp) sig
+    -> M (Sub, Context, P a, Beta LExp ('Const a))
+inferTExp env (SInt i) (Nil) = do
     p <- newName
     r <- newName
     return $ ( []
              , [(p, r)]
              , PInt r
-             , Sym (TInt i) :# p)
-inferSym env (SAdd) (Spine a :* Spine b :* Nil) = do
+             , inj (TInt i) :# p)
+inferTExp env (SAdd) (Spine a :* Spine b :* Nil) = do
     (sa, ca, ta, a') <- inferM env a
-    (sb, cb, tb, b') <- inferM (sub sa env) b
+    (sb, cb, tb, b') <- inferM (subS sa env) b
     p <- newName
     r <- newName
     return $ ( sb @@ sa
-             , (p, r) : sub sb ca ++ cb
+             , (p, r) : subC sb ca ++ cb
              , PInt r
-             , Sym TAdd :# p :$ Spine a' :$ Spine b')
-inferSym env (SLet) (Spine a :* (v :\ Spine f) :* Nil) = do
+             , inj TAdd :# p :$ Spine a' :$ Spine b')
+inferTExp env (SLet) (Spine a :* (v :\ Spine f) :* Nil) = do
     (sa, ca, ta, a') <- inferM env a
-    let (ca_p,ca_y) = partitionBound ca env
+    let (ca_p,ca_y) = freeL ca env ta
     let (x, rho) = case ca_y of
           [(x, y)] -> (x, (v, Ex (TypePred y (TypeConst ta)))) -- todo.
-    (sf, cf, tf, f') <- inferM (rho : sub sa env) f
+    (sf, cf, tf, f') <- inferM (rho : subS sa env) f
     p <- newName
     r <- newName
     return $ ( sf @@ sa
-             , sub sf ((p,r) : ca_p) ++ cf
+             , subC sf ((p,r) : ca_p) ++ cf
              , tf
-             , Sym TLet :# p :$ (x :\\ Spine a') :$ (v :\ Spine f'))
+             , inj TLet :# p :$ (x :\\ Spine a') :$ (v :\ Spine f'))
 
---------------------------------------------------------------------------------
-
-inferRgn :: forall sig a . (a ~ Result sig)
-    => Env -> SExp sig -> Args (Eta SExp) sig
-    -> M (Sub, Context, Prim a, Beta TExp ('Const a))
-inferRgn env sym as = do
-    (s,c,t,e') <- inferSym env sym as
-    let (pi,q) = partitionFree c env t
-    case primTyp t of
-      Dict -> return (s, q, t, foldr extend e' (map fst pi))
-  where
-    extend :: Typeable a => Place -> Beta TExp ('Const a) -> Beta TExp ('Const a)
-    extend p s = Sym (TLoc p) :$ (Spine s)
-
---------------------------------------------------------------------------------
-
--- | ...
-inferM :: forall a . Env -> Beta SExp ('Const a)
-    -> M (Sub, Context, Prim a, Beta TExp ('Const a))
-inferM env = constMatch (inferRgn env) (inferVar env)
-
-infer :: Beta SExp ('Const a) -> Beta TExp ('Const a)
-infer e = let (_,p,_,b) = runM (inferM [] e) in b
-  -- todo: Don't discard P.
-
---------------------------------------------------------------------------------
--- Extra stuff needed for inference.
---------------------------------------------------------------------------------
-
-type M a = State Name a
-
-runM :: M a -> a
-runM = flip S.evalState 0
-
-newName :: M Name
-newName = do n <- S.get; S.put (n+1); return n
-
-newNames :: (Enum a, Num a) => a -> M [Name]
-newNames n = mapM (const newName) [1..n]
-
---------------------------------------------------------------------------------
-
-type Env = [(Name, Ex TypeRep)]
-
-localSym :: Name -> TypeRep sig -> Env -> Env
-localSym n t env = (n, Ex t) : env
-
-findSym :: forall sig . Name -> Args (Eta SExp) sig -> Env -> TypeRep sig
-findSym v as env = case lookup v env of
-    Nothing -> error ("Variable " ++ show v ++ " not found")
-    Just (Ex d) -> undefined
-
---------------------------------------------------------------------------------
-
-type Context = [(Place,Region)]
-
-class Free a where
-    free :: a -> [Region]
-
-instance Free (Prim a) where
-    free (PInt r) = [r]
-
-instance Free Env where
-    free = concatMap (free . snd)
-
-instance Free (Ex TypeRep) where
-    free (Ex e) = free e
-
-instance Free (TypeRep sig) where
-    free (TypeConst p)    = free p
-    free (TypePart r a b) = r : free a ++ free b
-    free (TypePred r a)   = r : free a
-
-partitionFree :: Context -> Env -> Prim a -> (Context, Context)
-partitionFree ctxt env p =
-  let rs = free p ++ free env
-   in partition (not . flip elem rs . snd) ctxt
-
-partitionBound :: Context -> Env -> (Context, Context)
-partitionBound ctxt env =
-  let rs = free env
-   in partition (flip elem rs . snd) ctxt
-
---------------------------------------------------------------------------------
-
-type Sub = [(Region,Region)]
-
-class Substitute a where
-    sub :: Sub -> a -> a
-
-instance Substitute Region where
-    sub s r = case lookup r s of
-        Nothing -> r
-        Just r' -> r'
-
-instance Substitute (Prim a) where
-    sub s (PInt r) = PInt (sub s r)
-
-instance Substitute (TypeRep a) where
-    sub s (TypeConst p)    = TypeConst (sub s p)
-    sub s (TypePart r a b) = TypePart (sub s r) (sub s a) (sub s b)
-    sub s (TypePred r a)   = TypePred (sub s r) (sub s a)
-
-instance Substitute Env where
-    sub s = map (fmap (sub s))
-
-instance Substitute (Ex TypeRep) where
-    sub s (Ex t) = Ex (sub s t)
-
-instance Substitute Context where
-    sub s = map (fmap (sub s))
-
-(@@) :: Sub -> Sub -> Sub
-(@@) new old = [(u, sub new t) | (u, t) <- old] ++ new
-
---------------------------------------------------------------------------------
-
--- | Existential quantification.
-data Ex e where
-    Ex :: e a -> Ex e
-
-liftE :: (forall a . e a -> b) -> Ex e -> b
-liftE f (Ex a) = f a
+inferT :: Typeable a => ASTF SExp a -> ASTF LExp a
+inferT = infer
 
 --------------------------------------------------------------------------------
 -- Fin.

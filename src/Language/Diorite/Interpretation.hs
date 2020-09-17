@@ -8,7 +8,8 @@ module Language.Diorite.Interpretation
     , Denotation
     ) where
 
-import Language.Diorite.Syntax (Name, Put(..), Signature(..), Beta(..), Eta(..))
+import Language.Diorite.Syntax
+    (Name, Put(..), Signature(..), Beta(..), Eta(..), (:+:)(..))
 
 import qualified Control.Applicative as A
 
@@ -22,6 +23,12 @@ class Render sym where
     renderArgs :: [String] -> sym sig -> String
     renderArgs []   s = renderSym s
     renderArgs args s = "(" ++ unwords (renderSym s : args) ++ ")"
+
+instance (Render sym1, Render sym2) => Render (sym1 :+: sym2) where
+    renderSym (InjL l) = renderSym l
+    renderSym (InjR r) = renderSym r
+    renderArgs args (InjL l) = renderArgs args l
+    renderArgs args (InjR r) = renderArgs args r
 
 instance Show a => Render (A.Const a) where
     renderSym = show . A.getConst

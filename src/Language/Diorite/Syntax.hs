@@ -55,6 +55,8 @@ data Put = Put
 
 -- | Signature of a symbol.
 data Signature a = Const a | Signature a :-> Signature a | Put :=> Signature a
+  -- todo: Both '->' and '=>' should really be annotated with regions, but since
+  -- they're only used internally I could perhaps avoid them here.
 
 infixr :->, :=>
 
@@ -78,7 +80,7 @@ instance (Sig a, Sig sig) => Sig (a ':-> sig) where
 instance Sig sig => Sig ('Put ':=> sig) where
     signature = SigPred signature
 
--- | Witness ...
+-- | Any witness of a symbol signature is a valid symbol signature.
 witSig :: SigRep a -> Dict (Sig a)
 witSig (SigConst)    = Dict
 witSig (SigPart a b) | Dict <- witSig a, Dict <- witSig b = Dict
