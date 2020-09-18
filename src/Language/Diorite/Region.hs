@@ -13,7 +13,7 @@ module Language.Diorite.Region
     , Representable(..)
     , TypeRep(..)
     -- * Region inference.
-    , Infer(..)
+    , InferSym(..)
     , infer
     , inferM
     --
@@ -125,40 +125,31 @@ witType = witSig . symbol
 --------------------------------------------------------------------------------
 
 -- | ...
-class Infer sub sup where
+class InferSym sub sup where
     type Prim sup :: * -> *
-    -- | ...
-    inferSym :: forall sig a . (a ~ Result sig)
-        => Store (Prim sup)
-        -> sub sig
-        -> Args (Eta sub) sig
+    inferSym :: forall sig a . a ~ Result sig
+        => Store (Prim sup) -> sub sig -> Args (Eta sub) sig
         -> M (Sub, Context, Prim sup a, ASTF sup a)
 
-infer :: forall sub sup a
-    .  ( Infer sub sup
-       , Local :<: sup
-       , Free (Prim sup)
-       , Substitute (Prim sup)
-       , Fresh (Prim sup)
-       , Typeable a
-       )
-    => ASTF sub a -> ASTF sup a
-infer = err . runM . inferM []
-  where
-    err :: (Sub, Context, Prim sup a, ASTF sup a) -> ASTF sup a
-    err (_, _, _, b) = b
+-- | ...
+type Infer sub sup =
+    ( InferSym sub sup
+    , Local :<: sup
+    , Free (Prim sup)
+    , Substitute (Prim sup)
+    , Fresh (Prim sup)
+    )
+
+-- | ...
+infer :: forall sub sup a . (Infer sub sup, Typeable a) => ASTF sub a -> ASTF sup a
+infer ast = let (_, _, _, b) = runM (inferM [] ast) in b
   -- todo: Do not throw away the type.
 
-inferM :: forall sub sup a
-    .  ( Infer sub sup
-       , Local :<: sup
-       , Free (Prim sup)
-       , Substitute (Prim sup)
-       , Fresh (Prim sup)
-       , Typeable a
-       )
-    => Store (Prim sup)
-    -> ASTF sub a
+--------------------------------------------------------------------------------
+
+-- | ...
+inferM :: forall sub sup a . (Infer sub sup, Typeable a)
+    => Store (Prim sup) -> ASTF sub a
     -> M (Sub, Context, Prim sup a, ASTF sup a)
 inferM env = constMatch annotate instantiate
   where
@@ -181,17 +172,9 @@ inferM env = constMatch annotate instantiate
 
 --------------------------------------------------------------------------------
 
-reduceBeta :: forall sub sup s r a
-  .  ( a ~ Result s
-     , s ~ Erasure r
-     , Infer sub sup
-     , Local :<: sup
-     , Free (Prim sup)
-     , Fresh (Prim sup)
-     , Substitute (Prim sup)
-     )
-  => Store (Prim sup) -> Beta sup r -> TypeRep (Prim sup) r
-  -> Args (Eta sub) s
+-- | ...
+reduceBeta :: forall sub sup s r a . (a ~ Result s, s ~ Erasure r, Infer sub sup)
+  => Store (Prim sup) -> Beta sup r -> TypeRep (Prim sup) r -> Args (Eta sub) s
   -> M (Sub, Context, Prim sup a, Beta sup ('Const a))
 reduceBeta env beta (TypeConst t) (Nil) = do
   t' <- fresh t
@@ -206,15 +189,8 @@ reduceBeta env beta (TypePred _ a) as = do
   (s, c, t, b) <- reduceBeta env (beta :# p) a as
   return (s, (p, r) : c, t, b)
 
-reduceEta :: forall sub sup s r a
-  .  ( a ~ Result s
-     , s ~ Erasure r
-     , Infer sub sup
-     , Local :<: sup
-     , Free (Prim sup)
-     , Fresh (Prim sup)
-     , Substitute (Prim sup)
-     )
+-- | ...
+reduceEta :: forall sub sup s r a . (a ~ Result s, s ~ Erasure r, Infer sub sup)
   => Store (Prim sup) -> Eta sub s -> TypeRep (Prim sup) r
   -> M (Sub, Context, TypeRep (Prim sup) r, Eta sup r)
 reduceEta env (Spine beta) (TypeConst _) = do

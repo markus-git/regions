@@ -97,14 +97,6 @@ instance TestEquality P where
 instance Representable P Int where
     represent = PInt 0
 
-primEq :: P a -> P b -> Maybe (a :~: b)
-primEq (PInt _) (PInt _) = Just Refl
-
-primTyp :: P a -> Dict (Typeable a)
-primTyp (PInt _) = Dict
-
---------------------------------------------------------------------------------
-
 instance Free P where
     free (PInt r) = [r]
 
@@ -114,24 +106,26 @@ instance Substitute P where
 instance Fresh P where
     fresh (PInt _) = PInt <$> newName
 
+--------------------------------------------------------------------------------
+
 type LExp = TExp :+: Local
 
-instance Infer SExp LExp where
+instance InferSym SExp LExp where
     type Prim LExp = P
-    inferSym = inferTExp
+    inferSym = inferSym'
 
 -- | ...
-inferTExp :: forall sig a . (a ~ Result sig)
+inferSym' :: forall sig a . (a ~ Result sig)
     => Store P -> SExp sig -> Args (Eta SExp) sig
     -> M (Sub, Context, P a, Beta LExp ('Const a))
-inferTExp env (SInt i) (Nil) = do
+inferSym' env (SInt i) (Nil) = do
     p <- newName
     r <- newName
     return $ ( []
              , [(p, r)]
              , PInt r
              , inj (TInt i) :# p)
-inferTExp env (SAdd) (Spine a :* Spine b :* Nil) = do
+inferSym' env (SAdd) (Spine a :* Spine b :* Nil) = do
     (sa, ca, ta, a') <- inferM env a
     (sb, cb, tb, b') <- inferM (subS sa env) b
     p <- newName
@@ -140,7 +134,7 @@ inferTExp env (SAdd) (Spine a :* Spine b :* Nil) = do
              , (p, r) : subC sb ca ++ cb
              , PInt r
              , inj TAdd :# p :$ Spine a' :$ Spine b')
-inferTExp env (SLet) (Spine a :* (v :\ Spine f) :* Nil) = do
+inferSym' env (SLet) (Spine a :* (v :\ Spine f) :* Nil) = do
     (sa, ca, ta, a') <- inferM env a
     let (ca_p,ca_y) = freeL ca env ta
     let (x, rho) = case ca_y of
@@ -153,8 +147,8 @@ inferTExp env (SLet) (Spine a :* (v :\ Spine f) :* Nil) = do
              , tf
              , inj TLet :# p :$ (x :\\ Spine a') :$ (v :\ Spine f'))
 
-inferT :: Typeable a => ASTF SExp a -> ASTF LExp a
-inferT = infer
+inferTExp :: Typeable a => ASTF SExp a -> ASTF LExp a
+inferTExp = infer
 
 --------------------------------------------------------------------------------
 -- Fin.
