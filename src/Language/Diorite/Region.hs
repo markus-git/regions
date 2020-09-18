@@ -40,7 +40,7 @@ import Language.Diorite.Decoration
 import Language.Diorite.Interpretation (Render(..))
 import Language.Diorite.Traversal (Args(..), Result(..), constMatch)
 
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromJust)
 import Data.Constraint (Constraint, Dict(..), withDict)
 import Data.Proxy (Proxy(..))
 import Data.Type.Equality ((:~:)(..), TestEquality(..))
@@ -117,13 +117,8 @@ instance Sym (TypeRep r) where
     symbol (TypePart a b) = SigPart (symbol a) (symbol b)
     symbol (TypePred _ a) = SigPred (symbol a)
 
-witSigT :: TypeRep r sig -> Dict (Sig sig)
-witSigT = witSig . symbol
-
-resultT :: a ~ Result sig => TypeRep r sig -> r a
-resultT (TypeConst t)  = t
-resultT (TypePart _ b) = resultT b
-resultT (TypePred _ a) = resultT a
+witType :: TypeRep r sig -> Dict (Sig sig)
+witType = witSig . symbol
 
 --------------------------------------------------------------------------------
 -- * Region inference.
@@ -133,7 +128,7 @@ resultT (TypePred _ a) = resultT a
 class Infer sub sup where
     type Prim sup :: * -> *
     -- | ...
-    inferSym :: forall sig a . a ~ Result sig
+    inferSym :: forall sig a . (a ~ Result sig)
         => Store (Prim sup)
         -> sub sig
         -> Args (Eta sub) sig
@@ -165,84 +160,75 @@ inferM :: forall sub sup a
     => Store (Prim sup)
     -> ASTF sub a
     -> M (Sub, Context, Prim sup a, ASTF sup a)
-inferM env = constMatch (annotate env) (instantiate env)
+inferM env = constMatch annotate instantiate
+  where
+    annotate :: forall sig . a ~ Result sig
+        => sub sig -> Args (Eta sub) sig
+        -> M (Sub, Context, Prim sup a, Beta sup ('Const a))
+    annotate sym as = do
+        (s, c, t, b) <- inferSym env sym as
+        let (pi, q) = freeL c env t
+        return (s, q, t, foldr local b (map fst pi))
+
+    instantiate :: forall sig . (a ~ Result sig, Sig sig)
+        => Name -> Args (Eta sub) sig
+        -> M (Sub, Context, Prim sup a, Beta sup ('Const a))
+    instantiate name as = fromJust $ do
+        (Ex t)        <- P.lookup name env
+        (Erased Refl) <- eqET (signature :: SigRep sig) (symbol t)
+        return $ withDict (witType t) $
+            reduceBeta env (Var name) t as
 
 --------------------------------------------------------------------------------
 
--- | ...
-annotate :: forall sup sub sig a
-    .  ( a ~ Result sig
-       , Infer sub sup
-       , Local :<: sup
-       , Free (Prim sup)
-       , Substitute (Prim sup)
-       , Typeable a
-       )
-    => Store (Prim sup)
-    -> sub sig
-    -> Args (Eta sub) sig
-    -> M (Sub, Context, Prim sup a, Beta sup ('Const a))
-annotate env sym as = do
-    (s,c,t,e') <- inferSym env sym as
-    let (pi,q) = freeL c env t
-    return (s, q, t, foldr local e' (map fst pi))
+reduceBeta :: forall sub sup s r a
+  .  ( a ~ Result s
+     , s ~ Erasure r
+     , Infer sub sup
+     , Local :<: sup
+     , Free (Prim sup)
+     , Fresh (Prim sup)
+     , Substitute (Prim sup)
+     )
+  => Store (Prim sup) -> Beta sup r -> TypeRep (Prim sup) r
+  -> Args (Eta sub) s
+  -> M (Sub, Context, Prim sup a, Beta sup ('Const a))
+reduceBeta env beta (TypeConst t) (Nil) = do
+  t' <- fresh t
+  return ([], [], t', beta)
+reduceBeta env beta (TypePart a b) (eta :* as) = do
+  (s1, c1, _,  e) <- reduceEta env eta a
+  (s2, c2, t2, b) <- reduceBeta (subS s1 env) (beta :$ e) b as
+  return (s2 @@ s1, c2 ++ subC s2 c1, t2, b)
+reduceBeta env beta (TypePred _ a) as = do
+  r <- newName
+  p <- newName
+  (s, c, t, b) <- reduceBeta env (beta :# p) a as
+  return (s, (p, r) : c, t, b)
 
-instantiate :: forall sup sub sig r a
-    .  ( a ~ Result sig
-       , Sig sig
-       , Infer sub sup  -- todo: Put all these in a dict.
-       , Local :<: sup
-       , Free (Prim sup)
-       , Fresh (Prim sup)
-       , Substitute (Prim sup)
-       )
-    => Store (Prim sup)
-    -> Name
-    -> Args (Eta sub) sig
-    -> M (Sub, Context, Prim sup a, Beta sup ('Const a))
-instantiate env name as = withType (\t ->
-    withDict (witSigT t) (reduceBeta env (Var name) t as))
-  where
-    withType :: forall r
-        .  (forall rig . sig ~ Erasure rig => TypeRep (Prim sup) rig -> M r)
-        -> M r
-    withType f = fromMaybe (error $ "Variable " ++ show name ++ " not found.") $
-      do (Ex t)        <- P.lookup name env
-         (Erased Refl) <- eqET (signature :: SigRep sig) (symbol t)
-         withDict (witSigT t) (return (f t))
-
-    reduceBeta :: forall s r a . (a ~ Result s, s ~ Erasure r)
-        => Store (Prim sup) -> Beta sup r -> TypeRep (Prim sup) r
-        -> Args (Eta sub) s
-        -> M (Sub, Context, Prim sup a, Beta sup ('Const a))
-    reduceBeta env beta (TypeConst t) (Nil) = do
-        t' <- fresh t
-        return ([], [], t', beta)
-    reduceBeta env beta (TypePart a b) (eta :* as) = do
-        (s1, c1, _,  e) <- reduceEta env eta a
-        (s2, c2, t2, b) <- reduceBeta (subS s1 env) (beta :$ e) b as
-        return (s2 @@ s1, c2 ++ subC s2 c1, t2, b)
-    reduceBeta env beta (TypePred _ a) as = do
-        r <- newName
-        p <- newName
-        (s, c, t, b) <- reduceBeta env (beta :# p) a as
-        return (s, (p, r) : c, t, b)
-
-    reduceEta :: forall s r a . (a ~ Result s, s ~ Erasure r)
-        => Store (Prim sup) -> Eta sub s -> TypeRep (Prim sup) r
-        -> M (Sub, Context, TypeRep (Prim sup) r, Eta sup r)
-    reduceEta env (Spine beta) (TypeConst _) = do
-        (s, c, p, b) <- inferM env beta
-        return (s, c, TypeConst p, Spine b)
-    reduceEta env (v :\ eta) (TypePart a b) = do
-        (s, c, t, e) <- reduceEta (store v a env) eta b
-        withDict (witSigT a) $
-            return (s, c, TypePart (sub s a) t, v :\ e)
-    reduceEta env eta (TypePred _ a) = do
-        r <- newName
-        p <- newName
-        (s, c, t, e) <- reduceEta env eta a
-        return (s, (p, r) : c, TypePred r t, p :\\ e)
+reduceEta :: forall sub sup s r a
+  .  ( a ~ Result s
+     , s ~ Erasure r
+     , Infer sub sup
+     , Local :<: sup
+     , Free (Prim sup)
+     , Fresh (Prim sup)
+     , Substitute (Prim sup)
+     )
+  => Store (Prim sup) -> Eta sub s -> TypeRep (Prim sup) r
+  -> M (Sub, Context, TypeRep (Prim sup) r, Eta sup r)
+reduceEta env (Spine beta) (TypeConst _) = do
+  (s, c, p, b) <- inferM env beta
+  return (s, c, TypeConst p, Spine b)
+reduceEta env (v :\ eta) (TypePart a b) = do
+  (s, c, t, e) <- reduceEta (store v a env) eta b
+  withDict (witType a) $
+    return (s, c, TypePart (sub s a) t, v :\ e)
+reduceEta env eta (TypePred _ a) = do
+  r <- newName
+  p <- newName
+  (s, c, t, e) <- reduceEta env eta a
+  return (s, (p, r) : c, TypePred r t, p :\\ e)
   -- todo: 'sig ~ Erasure rsig' means that we cannot have ':~' in the args.
   -- todo: Could interleave with reg. inference for tighter binds.
 

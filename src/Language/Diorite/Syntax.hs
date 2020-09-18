@@ -42,7 +42,7 @@ module Language.Diorite.Syntax
 -- Related stuff:
 --   https://emilaxelsson.github.io/documents/axelsson2012generic.pdf
 
-import Data.Constraint (Dict(..))
+import Data.Constraint (Dict(..), withDict)
 import Data.Typeable (Typeable)
 
 --------------------------------------------------------------------------------
@@ -124,12 +124,16 @@ type AST sym sig = Beta sym sig
 -- | Fully applied AST (constant value).
 type ASTF sym sig = Beta sym ('Const sig)
 
+--------------------------------------------------------------------------------
+
 -- | Symbol with a valid signature.
 class Sym sym where
     symbol :: sym sig -> SigRep sig
 
 instance Sym SigRep where
     symbol = id
+
+--------------------------------------------------------------------------------
 
 -- | Get the highest name bound for 'Eta' node.
 maxLamEta :: Eta sym a -> Name
@@ -164,6 +168,7 @@ type instance SmartBeta sym (a ':-> sig)    = SmartEta sym a -> SmartBeta sym si
 type family SmartEta (sym :: Signature * -> *) (sig :: Signature *)
 type instance SmartEta sym ('Const a)   = Beta sym ('Const a)
 type instance SmartEta sym (a ':-> sig) = Beta sym a -> SmartEta sym sig
+-- type instance SmartEta sym ('Put ':=> sig) = ... => SmartEta sym sig
 
 -- | Maps a "smart" constructor to its corresponding symbol's signature.
 type family SmartSig f :: Signature *
@@ -194,7 +199,7 @@ smartSym' sym = smartBeta (signature :: SigRep sig) (Sym sym)
 
     smartEta :: forall a . SigRep a -> SmartEta sym a -> Eta sym a
     smartEta (SigConst)      f = Spine f
-    smartEta (SigPart a sig) f | Dict <- witSig a = lam (smartEta sig . f)
+    smartEta (SigPart a sig) f = withDict (witSig a) (lam (smartEta sig . f))
     smartEta (SigPred _)     _ = undefined
 
 --------------------------------------------------------------------------------
