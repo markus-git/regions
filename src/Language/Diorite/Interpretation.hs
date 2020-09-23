@@ -9,7 +9,9 @@ module Language.Diorite.Interpretation
     ) where
 
 import Language.Diorite.Syntax
-    (Name, Put(..), Signature(..), Beta(..), Eta(..), (:+:)(..))
+    ( Put(..), Qualifiers(..), Signature(..)
+    , Name, Beta(..), Eta(..)
+    , (:+:)(..))
 
 import qualified Control.Applicative as A
 
@@ -34,22 +36,22 @@ instance Show a => Render (A.Const a) where
     renderSym = show . A.getConst
 
 -- | Render a 'Beta' tree as concrete syntax.
-renderBeta :: Render sym => [String] -> Beta sym a -> String
+renderBeta :: Render sym => [String] -> Beta sym rs a -> String
 renderBeta args (Var n)  = renderArgs args (A.Const ('v' : show n))
 renderBeta args (Sym s)  = renderArgs args s
 renderBeta args (s :$ e) = renderBeta (renderEta e : args) s
 renderBeta args (s :# p) = renderBeta (('r' : show p) : args) s
 
 -- | Render an 'Eta' spine as concrete syntax.
-renderEta :: Render sym => Eta sym a -> String
+renderEta :: Render sym => Eta sym rs a -> String
 renderEta (n :\ e)  = "(\\" ++ ('v' : show n) ++ ". " ++ renderEta e ++ ")"
 renderEta (p :\\ e) = "(/\\" ++ ('r' : show p) ++ ". " ++ renderEta e ++ ")"
 renderEta (Spine b) = renderBeta [] b
 
-instance Render sym => Show (Beta sym a) where
+instance Render sym => Show (Beta sym 'None a) where
     show = renderBeta []
 
-instance Render sym => Show (Eta sym a) where
+instance Render sym => Show (Eta sym 'None a) where
     show = renderEta
 
 --------------------------------------------------------------------------------
@@ -58,10 +60,9 @@ instance Render sym => Show (Eta sym a) where
 
 -- | Denotation of a symbol's signature.
 type family Denotation sig where
-    Denotation ('Const a)    = a
-    Denotation (a ':-> b)    = Denotation a -> Denotation b
-    Denotation ('Put ':=> a) = Name -> Denotation a
-
--- todo.
+    Denotation ('Const a)      = a
+    Denotation (a ':-> b)      = Denotation a -> Denotation b
+    Denotation ('Put r ':=> a) = Name -> Denotation a
+  -- todo: ...?
 
 --------------------------------------------------------------------------------

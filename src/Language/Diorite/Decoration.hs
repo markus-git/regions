@@ -10,7 +10,8 @@ module Language.Diorite.Decoration
     ) where
 
 import Language.Diorite.Syntax
-    ( Sig, Sym(..), Beta(..), Eta(..), SmartBeta, SmartSig, SmartSym
+    ( Sig, Sym(..), Beta(..), Eta(..)
+    , SmartBeta, SmartSig, SmartSym
     , Project(..), (:<:)(..), smartSym')
 import Language.Diorite.Interpretation (Render(..))
 import Language.Diorite.Traversal (Result)
@@ -41,25 +42,25 @@ instance Project sub sup => Project sub (sup :&: info) where
 -- | Decorate every node in an "AST" according to 'f'.
 decorate :: forall sym info sig
     .  (forall a . sym a -> info (Result a))
-    -> Beta sym sig -> Beta (sym :&: info) sig
+    -> Beta sym rs sig -> Beta (sym :&: info) rs sig
 decorate _ (Var n)  = Var n
 decorate f (Sym s)  = Sym (s :&: f s)
 decorate f (b :# p) = decorate f b :# p
 decorate f (b :$ e) = decorate f b :$ decorateEta e
   where
-    decorateEta :: Eta sym sig' -> Eta (sym :&: info) sig'
+    decorateEta :: Eta sym rs sig' -> Eta (sym :&: info) rs sig'
     decorateEta (n :\  e') = n :\  decorateEta e'
     decorateEta (p :\\ e') = p :\\ decorateEta e'
     decorateEta (Spine b') = Spine (decorate f b')
 
 -- | Strip decorations from every node in an "AST".
-strip :: Beta (sym :&: info) sig -> Beta sym sig
+strip :: Beta (sym :&: info) rs sig -> Beta sym rs sig
 strip (Var n)  = Var n
 strip (Sym s)  = Sym (_sym s)
 strip (b :# p) = strip b :# p
 strip (b :$ e) = strip b :$ stripEta e
   where
-    stripEta :: Eta (sym :&: info) sig -> Eta sym sig
+    stripEta :: Eta (sym :&: info) rs sig -> Eta sym rs sig
     stripEta (n :\  e') = n :\  stripEta e'
     stripEta (p :\\ e') = p :\\ stripEta e'
     stripEta (Spine b') = Spine (strip b')

@@ -65,12 +65,15 @@ test_share = letS one (\v -> one `addS` v)
 data TExp a where
     TInt :: Int -> TExp ('Put ':=> 'Const Int)
     TAdd :: TExp ('Put ':=> 'Const Int ':-> 'Const Int ':-> 'Const Int)
-    TLet :: TExp
-        (    'Put
-        ':=> ('Put ':=> 'Const Int)
-        ':-> ('Const Int ':-> 'Const Int)
-        ':-> 'Const Int
-        )
+    TLet :: ( Constant sig
+            , Typeable a
+            , a ~ Result sig
+            )
+         => TExp ('Put
+                 ':=> sig
+                 ':-> ('Const a ':-> 'Const Int)
+                 ':-> 'Const Int
+                 )
     TLoc :: Typeable a => Place -> TExp ('Const a ':-> 'Const a)
   -- todo: The number of 'Put':s in 'TLet' really depend on its shared value.
 
@@ -134,6 +137,7 @@ inferSym' env (SAdd) (Spine a :* Spine b :* Nil) = do
              , (p, r) : subC sb ca ++ cb
              , PInt r
              , inj TAdd :# p :$ Spine a' :$ Spine b')
+{-
 inferSym' env (SLet) (Spine a :* (v :\ Spine f) :* Nil) = do
     (sa, ca, ta, a') <- inferM env a
     let (ca_p,ca_y) = freeL ca env ta
@@ -146,6 +150,7 @@ inferSym' env (SLet) (Spine a :* (v :\ Spine f) :* Nil) = do
              , subC sf ((p,r) : ca_p) ++ cf
              , tf
              , inj TLet :# p :$ (x :\\ Spine a') :$ (v :\ Spine f'))
+-}
 
 inferTExp :: Typeable a => ASTF SExp a -> ASTF LExp a
 inferTExp = infer

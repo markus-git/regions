@@ -1,13 +1,16 @@
---{-# OPTIONS_GHC -Wall #-}
+{-# OPTIONS_GHC -Wall #-}
 
-{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE ConstraintKinds        #-}
+{-# LANGUAGE FunctionalDependencies #-}
 
-module Language.Diorite.Region
+module Language.Diorite.Region where
+{-
     (
     -- * Valid primitive types.
-      Erasure(..)
+      Erasure
     , (:~~:)(..)
     -- * ...
+    , Region
     , Local(..)
     -- * ...
     , Representable(..)
@@ -16,7 +19,7 @@ module Language.Diorite.Region
     , InferSym(..)
     , infer
     , inferM
-    --
+    -- * ...
     , M
     , Store
     , Context
@@ -34,15 +37,14 @@ module Language.Diorite.Region
     , subC
     , (@@)
     ) where
+-}
 
 import Language.Diorite.Syntax
-import Language.Diorite.Decoration
 import Language.Diorite.Interpretation (Render(..))
-import Language.Diorite.Traversal (Args(..), Result(..), constMatch)
+import Language.Diorite.Traversal (Args(..), Result, constMatch)
 
 import Data.Maybe (fromJust)
-import Data.Constraint (Constraint, Dict(..), withDict)
-import Data.Proxy (Proxy(..))
+import Data.Constraint (Dict(..), withDict)
 import Data.Type.Equality ((:~:)(..), TestEquality(..))
 import Data.Typeable (Typeable, eqT)
 import qualified Data.List as L (partition)
@@ -57,28 +59,11 @@ import qualified Prelude as P (lookup)
 -- * ...
 --------------------------------------------------------------------------------
 
--- | Local region-bindings.
-data Local sig where
-    Local :: Typeable a => Place -> Local ('Const a ':-> 'Const a)
-
-instance Render Local where
-    renderSym (Local p) = "local " ++ show p
-
-instance Sym Local where
-    symbol (Local _) = signature
-
-local :: (Typeable a, Local :<: sym) => Place -> ASTF sym a -> ASTF sym a
-local = smartSym . Local
-
---------------------------------------------------------------------------------
--- * ...
---------------------------------------------------------------------------------
-
 -- | Erasure of any "Put" predicates of a symbol's signature.
 type family Erasure a where
-    Erasure ('Const a)    = 'Const a
-    Erasure (a ':-> b)    = Erasure a ':-> Erasure b
-    Erasure ('Put ':=> a) = Erasure a
+    Erasure ('Const a) = 'Const a
+    Erasure (a ':-> b) = Erasure a ':-> Erasure b
+    Erasure (p ':=> a) = Erasure a
 
 -- | Witness of equality under "Erasure" of second signature.
 newtype sig :~~: sig' = Erased (sig :~: Erasure sig')
@@ -86,18 +71,23 @@ newtype sig :~~: sig' = Erased (sig :~: Erasure sig')
 infixr :~~:
 
 -- | Extract a witness of equality of a type and its erasure.
-eqET :: SigRep sig -> SigRep rsig -> Maybe (sig :~~: rsig)
-eqET (SigConst :: SigRep a) (SigConst :: SigRep b) = do
-    (Refl :: a :~: b) <- eqT
-    return (Erased Refl)
-eqET (SigPart a b) (SigPart c d) = do
-    (Erased Refl) <- eqET a c
-    (Erased Refl) <- eqET b d
-    return (Erased Refl)
-eqET sig (SigPred a) = do
-    (Erased Refl) <- eqET sig a
-    return (Erased Refl)
-eqET _ _ = Nothing
+class TestErasure f where
+    testErasure :: f a -> f b -> Maybe (a :~~: b)
+
+instance TestErasure SigRep where
+    testErasure (SigConst :: SigRep a) (SigConst :: SigRep b) = do
+        (Refl :: a :~: b) <- eqT; return (Erased Refl)
+    testErasure (SigPart a b) (SigPart c d) = do
+        testErasure a c |~ testErasure b d |~ return (Erased Refl)
+    testErasure sig (SigPred a) = do
+        testErasure sig a |~ return (Erased Refl)
+    testErasure _ _ = Nothing
+
+(|~) :: Maybe (a :~~: b) -> (a ~ Erasure b => Maybe c) -> Maybe c
+(|~) m a = do (Erased Refl) <- m;  a
+  -- Note: 'Erasure' being a type family seems to prevent a 'HasDict' instance.
+
+infixr |~
 
 --------------------------------------------------------------------------------
 -- * ...
@@ -106,10 +96,10 @@ eqET _ _ = Nothing
 class (TestEquality rep, Typeable a) => Representable rep (a :: *) where
     represent :: rep a
 
-data TypeRep (rep :: * -> *) (sig :: Signature *) where
+data TypeRep (rep :: * -> *) (sig :: Signature (Put *) *) where
     TypeConst :: Representable rep a => rep a -> TypeRep rep ('Const a)
     TypePart  :: TypeRep rep a -> TypeRep rep sig -> TypeRep rep (a ':-> sig)
-    TypePred  :: Region -> TypeRep rep sig -> TypeRep rep ('Put ':=> sig)
+    TypePred  :: Region -> TypeRep rep sig -> TypeRep rep ('Put r ':=> sig)
   -- todo: Annotate lambdas with regions.
 
 instance Sym (TypeRep r) where
@@ -117,13 +107,38 @@ instance Sym (TypeRep r) where
     symbol (TypePart a b) = SigPart (symbol a) (symbol b)
     symbol (TypePred _ a) = SigPred (symbol a)
 
+instance TestErasure (TypeRep r) where
+    testErasure a b = testErasure (symbol a) (symbol b)
+
+-- | ...
 witType :: TypeRep r sig -> Dict (Sig sig)
 witType = witSig . symbol
 
 --------------------------------------------------------------------------------
--- * Region inference.
+-- * ...
 --------------------------------------------------------------------------------
 
+-- | Name of a region, associated with one or more places.
+type Region = Name
+
+-- | Local region-bindings.
+data Local sig where
+    Local :: Typeable a => Place r -> Local ('Const a ':-> 'Const a)
+
+instance Render Local where
+    renderSym (Local p) = "local " ++ show p
+
+instance Sym Local where
+    symbol (Local _) = signature
+
+local :: (Typeable a, Local :<: sym)
+    => Place r -> Beta sym ('Put r ':- rs) ('Const a) -> Beta sym rs ('Const a)
+local = smartSym . Local
+
+--------------------------------------------------------------------------------
+-- * Region inference.
+--------------------------------------------------------------------------------
+{-
 -- | ...
 class InferSym sub sup where
     type Prim sup :: * -> *
@@ -144,9 +159,9 @@ type Infer sub sup =
 infer :: forall sub sup a . (Infer sub sup, Typeable a) => ASTF sub a -> ASTF sup a
 infer ast = let (_, _, _, b) = runM (inferM [] ast) in b
   -- todo: Do not throw away the type.
-
+-}
 --------------------------------------------------------------------------------
-
+{-
 -- | ...
 inferM :: forall sub sup a . (Infer sub sup, Typeable a)
     => Store (Prim sup) -> ASTF sub a
@@ -158,8 +173,8 @@ inferM env = constMatch annotate instantiate
         -> M (Sub, Context, Prim sup a, Beta sup ('Const a))
     annotate sym as = do
         (s, c, t, b) <- inferSym env sym as
-        let (pi, q) = freeL c env t
-        return (s, q, t, foldr local b (map fst pi))
+        let (p, q) = freeL c env t
+        return (s, q, t, foldr local b (map fst p))
 
     instantiate :: forall sig . (a ~ Result sig, Sig sig)
         => Name -> Args (Eta sub) sig
@@ -169,49 +184,49 @@ inferM env = constMatch annotate instantiate
         (Erased Refl) <- eqET (signature :: SigRep sig) (symbol t)
         return $ withDict (witType t) $
             reduceBeta env (Var name) t as
-
+-}
 --------------------------------------------------------------------------------
-
+{-
 -- | ...
 reduceBeta :: forall sub sup s r a . (a ~ Result s, s ~ Erasure r, Infer sub sup)
   => Store (Prim sup) -> Beta sup r -> TypeRep (Prim sup) r -> Args (Eta sub) s
   -> M (Sub, Context, Prim sup a, Beta sup ('Const a))
-reduceBeta env beta (TypeConst t) (Nil) = do
+reduceBeta _ beta (TypeConst t) (Nil) = do
   t' <- fresh t
   return ([], [], t', beta)
 reduceBeta env beta (TypePart a b) (eta :* as) = do
-  (s1, c1, _,  e) <- reduceEta env eta a
-  (s2, c2, t2, b) <- reduceBeta (subS s1 env) (beta :$ e) b as
-  return (s2 @@ s1, c2 ++ subC s2 c1, t2, b)
+  (s1, c1, _,  e') <- reduceEta env eta a
+  (s2, c2, t2, b') <- reduceBeta (subS s1 env) (beta :$ e') b as
+  return (s2 @@ s1, c2 ++ subC s2 c1, t2, b')
 reduceBeta env beta (TypePred _ a) as = do
   r <- newName
   p <- newName
-  (s, c, t, b) <- reduceBeta env (beta :# p) a as
-  return (s, (p, r) : c, t, b)
+  (s, c, t, b') <- reduceBeta env (beta :# p) a as
+  return (s, (p, r) : c, t, b')
 
 -- | ...
 reduceEta :: forall sub sup s r a . (a ~ Result s, s ~ Erasure r, Infer sub sup)
   => Store (Prim sup) -> Eta sub s -> TypeRep (Prim sup) r
   -> M (Sub, Context, TypeRep (Prim sup) r, Eta sup r)
 reduceEta env (Spine beta) (TypeConst _) = do
-  (s, c, p, b) <- inferM env beta
-  return (s, c, TypeConst p, Spine b)
+  (s, c, p, b') <- inferM env beta
+  return (s, c, TypeConst p, Spine b')
 reduceEta env (v :\ eta) (TypePart a b) = do
-  (s, c, t, e) <- reduceEta (store v a env) eta b
+  (s, c, t, e') <- reduceEta (store v a env) eta b
   withDict (witType a) $
-    return (s, c, TypePart (sub s a) t, v :\ e)
+    return (s, c, TypePart (sub s a) t, v :\ e')
 reduceEta env eta (TypePred _ a) = do
   r <- newName
   p <- newName
-  (s, c, t, e) <- reduceEta env eta a
-  return (s, (p, r) : c, TypePred r t, p :\\ e)
+  (s, c, t, e') <- reduceEta env eta a
+  return (s, (p, r) : c, TypePred r t, p :\\ e')
   -- todo: 'sig ~ Erasure rsig' means that we cannot have ':~' in the args.
   -- todo: Could interleave with reg. inference for tighter binds.
-
+-}
 --------------------------------------------------------------------------------
 -- ** ...
 --------------------------------------------------------------------------------
-
+{-
 type Store r = [(Name, Ex (TypeRep r))] -- Variable store.
 type Context = [(Place, Region)]        -- Region store.
 type Sub     = [(Region,Region)]        -- Substitutions.
@@ -267,18 +282,6 @@ subC s = map (fmap (subR s))
 
 class Fresh f where
     fresh :: f a -> M (f a)
-
-class Unify f where
-    unify :: f a -> f a -> Sub
-
-instance Unify r => Unify (TypeRep r) where
-    unify (TypeConst p)  (TypeConst q)  = unify  p q
-    unify (TypePart a b) (TypePart c d) = unify  a c ++ unify b d
-    unify (TypePred i a) (TypePred j b) = unifyR i j ++ unify a b
-
-unifyR :: Region -> Region -> Sub
-unifyR p q | p == q    = []
-           | otherwise = [(p, q)]
-           
+-}           
 --------------------------------------------------------------------------------
 -- Fin.
