@@ -61,11 +61,10 @@ type Place r = Int
 
 -- | Collection of predicates of a region-qualified symbol.
 data Qualifiers r = Put r :- Qualifiers r | None
-  -- todo: Ordering should not important(?).
+  -- todo: Use an actual collection, rather than a list.
 
 infixr :-
 {-
--- | Joins two collections of qualifiers.
 type family Both (ps :: Qualifiers put) (qs :: Qualifiers put) where
     Both ('None)    qs = qs
     Both (p ':- ps) qs = p ':- (Both ps qs)
@@ -124,15 +123,26 @@ type Name = Int
 
 -- | Generic abstact syntax tree with beta-eta long normal form.
 data Beta sym rs (sig :: Signature (Put *) *) where
-    Var  :: Sig sig => Name -> Beta sym rs sig
-    Sym  :: sym sig -> Beta sym 'None sig
-    (:$) :: Beta sym rs (a ':-> sig) -> Eta sym rs a -> Beta sym rs sig
-    (:#) :: Beta sym rs ('Put r ':=> sig) -> Place r -> Beta sym ('Put r ':- rs) sig
+    -- ^ Variable.
+    Var   :: Sig sig => Name -> Beta sym rs sig
+    -- ^ Symbol.
+    Sym   :: sym sig -> Beta sym 'None sig
+    -- ^ Application.
+    (:$)  :: Beta sym rs (a ':-> sig) -> Eta sym rs a -> Beta sym rs sig
+    -- ^ Region-application.
+    (:#)  :: Beta sym rs ('Put r ':=> sig) -> Place r -> Beta sym ('Put r ':- rs) sig
+    -- ^ Introduction of a local region.
+    Local :: Beta sym ('Put r ':- rs) sig -> Place r -> Beta sym rs sig
+  -- todo: Ordering of predicates for 'Local'.
 
 data Eta sym rs (sig :: Signature (Put *) *) where
+    -- ^ Body of lambda-expression.
     Spine :: Beta sym rs ('Const a) -> Eta sym rs ('Const a)
+    -- ^ Abstraction.
     (:\)  :: Sig a => Name -> Eta sym rs sig -> Eta sym rs (a ':-> sig)
+    -- ^ Region-abstraction.
     (:\\) :: Place r -> Eta sym ('Put r ':- rs) sig -> Eta sym rs ('Put r ':=> sig)
+  -- todo: Ordering of predicates for ':\\'.
 
 infixl 1 :$, :#
 
@@ -178,8 +188,8 @@ lam f = v :\ body
 
 -- | Maps a symbol to its corresponding "smart" constructor.
 type family SmartBeta (sym :: Signature (Put *) * -> *) (sig :: Signature (Put *) *)
-type instance SmartBeta sym ('Const a)      = ASTF sym a
-type instance SmartBeta sym (a ':-> sig)    = SmartEta sym a -> SmartBeta sym sig
+type instance SmartBeta sym ('Const a)   = ASTF sym a
+type instance SmartBeta sym (a ':-> sig) = SmartEta sym a -> SmartBeta sym sig
 
 -- | Maps a function to its corresponding "
 type family SmartEta (sym :: Signature (Put *) * -> *) (sig :: Signature (Put *) *)

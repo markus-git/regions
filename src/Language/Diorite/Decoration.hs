@@ -40,18 +40,19 @@ instance Project sub sup => Project sub (sup :&: info) where
 --------------------------------------------------------------------------------
 
 -- | Decorate every node in an "AST" according to 'f'.
-decorate :: forall sym info sig
+decorate :: forall sym info rs sig
     .  (forall a . sym a -> info (Result a))
     -> Beta sym rs sig -> Beta (sym :&: info) rs sig
-decorate _ (Var n)  = Var n
-decorate f (Sym s)  = Sym (s :&: f s)
-decorate f (b :# p) = decorate f b :# p
-decorate f (b :$ e) = decorate f b :$ decorateEta e
+decorate _ (Var n)     = Var n
+decorate f (Sym s)     = Sym (s :&: f s)
+decorate f (b :# p)    = decorate f b :# p
+decorate f (b :$ e)    = decorate f b :$ decorateEta e
   where
-    decorateEta :: Eta sym rs sig' -> Eta (sym :&: info) rs sig'
+    decorateEta :: forall p a . Eta sym p a -> Eta (sym :&: info) p a
     decorateEta (n :\  e') = n :\  decorateEta e'
     decorateEta (p :\\ e') = p :\\ decorateEta e'
     decorateEta (Spine b') = Spine (decorate f b')
+decorate f (Local b p) = Local (decorate f b) p
 
 -- | Strip decorations from every node in an "AST".
 strip :: Beta (sym :&: info) rs sig -> Beta sym rs sig
@@ -64,6 +65,7 @@ strip (b :$ e) = strip b :$ stripEta e
     stripEta (n :\  e') = n :\  stripEta e'
     stripEta (p :\\ e') = p :\\ stripEta e'
     stripEta (Spine b') = Spine (strip b')
+strip (Local b p) = Local (strip b) p
 
 -- | Make a "smart" constructor for a symbol decorated with some information.
 smartSymDecor :: forall sup sub info sig f

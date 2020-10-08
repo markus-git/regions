@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wall #-}
+
 module Language.Diorite.Sugar
     (
     -- * Syntactic sugaring.

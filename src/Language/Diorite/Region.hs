@@ -59,6 +59,9 @@ import qualified Prelude as P (lookup)
 -- * ...
 --------------------------------------------------------------------------------
 
+-- | Name of a region, associated with one or more places.
+type Region = Name
+
 -- | Erasure of any "Put" predicates of a symbol's signature.
 type family Erasure a where
     Erasure ('Const a) = 'Const a
@@ -113,27 +116,6 @@ instance TestErasure (TypeRep r) where
 -- | ...
 witType :: TypeRep r sig -> Dict (Sig sig)
 witType = witSig . symbol
-
---------------------------------------------------------------------------------
--- * ...
---------------------------------------------------------------------------------
-
--- | Name of a region, associated with one or more places.
-type Region = Name
-
--- | Local region-bindings.
-data Local sig where
-    Local :: Typeable a => Place r -> Local ('Const a ':-> 'Const a)
-
-instance Render Local where
-    renderSym (Local p) = "local " ++ show p
-
-instance Sym Local where
-    symbol (Local _) = signature
-
-local :: (Typeable a, Local :<: sym)
-    => Place r -> Beta sym ('Put r ':- rs) ('Const a) -> Beta sym rs ('Const a)
-local = smartSym . Local
 
 --------------------------------------------------------------------------------
 -- * Region inference.

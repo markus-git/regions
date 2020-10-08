@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wall #-}
+
 module Language.Diorite.Interpretation
     (
     -- * Rendering.
@@ -37,16 +39,17 @@ instance Show a => Render (A.Const a) where
 
 -- | Render a 'Beta' tree as concrete syntax.
 renderBeta :: Render sym => [String] -> Beta sym rs a -> String
-renderBeta args (Var n)  = renderArgs args (A.Const ('v' : show n))
-renderBeta args (Sym s)  = renderArgs args s
-renderBeta args (s :$ e) = renderBeta (renderEta e : args) s
-renderBeta args (s :# p) = renderBeta (('r' : show p) : args) s
+renderBeta args (Var n)     = renderArgs args (A.Const ('v' : show n))
+renderBeta args (Sym s)     = renderArgs args s
+renderBeta args (s :$ e)    = renderBeta (renderEta e : args) s
+renderBeta args (s :# p)    = renderBeta (('r' : show p) : args) s
+renderBeta args (Local b p) = "local " ++ ('r' : show p) ++ ". " ++ renderBeta args b
 
 -- | Render an 'Eta' spine as concrete syntax.
 renderEta :: Render sym => Eta sym rs a -> String
+renderEta (Spine b) = renderBeta [] b
 renderEta (n :\ e)  = "(\\" ++ ('v' : show n) ++ ". " ++ renderEta e ++ ")"
 renderEta (p :\\ e) = "(/\\" ++ ('r' : show p) ++ ". " ++ renderEta e ++ ")"
-renderEta (Spine b) = renderBeta [] b
 
 instance Render sym => Show (Beta sym 'None a) where
     show = renderBeta []

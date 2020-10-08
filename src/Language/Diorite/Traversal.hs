@@ -43,8 +43,8 @@ match :: forall sym rs a c
     -> c ('Const a)
 match matchSym matchVar = flip matchBeta Nil
   where
-    matchBeta :: forall rs sig . a ~ Result sig =>
-        Beta sym rs sig -> Args sym rs sig -> c ('Const a)
+    matchBeta :: forall ps sig . a ~ Result sig =>
+        Beta sym ps sig -> Args sym ps sig -> c ('Const a)
     matchBeta (Var n)  as = matchVar n as
     matchBeta (Sym s)  as = matchSym s as
     matchBeta (b :$ e) as = matchBeta b (e :* as)
