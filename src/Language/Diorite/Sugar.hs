@@ -12,8 +12,7 @@ module Language.Diorite.Sugar
 --   https://emilaxelsson.github.io/documents/axelsson2013using.pdf
 
 import Language.Diorite.Syntax
-    ( Put(..), Qualifiers(..), Signature(..), Sig(..)
-    , Name, Beta(..), Eta(..), lam)
+    (Signature(..), Sig(..), Beta(..), Eta(..), lam)
 
 --------------------------------------------------------------------------------
 -- * Syntactic sugaring.
@@ -21,10 +20,10 @@ import Language.Diorite.Syntax
 
 -- | Syntactic sugaring for 'AST' embeddings.
 class Syntactic a where
-    type Domain a   :: Signature (Put *) * -> *
-    type Internal a :: Signature (Put *) *
-    sugar   :: Beta (Domain a) 'None (Internal a) -> a
-    desugar :: a -> Eta (Domain a) 'None (Internal a)
+    type Domain a   :: Signature * * -> *
+    type Internal a :: Signature * *
+    sugar   :: Beta (Domain a) (Internal a) -> a
+    desugar :: a -> Eta (Domain a) (Internal a)
 
 -- | Syntactic type casting.
 resugar ::
@@ -37,18 +36,18 @@ resugar ::
     => a -> b
 resugar = sugar . tail' . desugar
   where
-    tail' :: Eta (Domain a) 'None ('Const a) -> Beta (Domain a) 'None ('Const a)
+    tail' :: Eta (Domain a) ('Const a) -> Beta (Domain a) ('Const a)
     tail' (Spine b) = b
 
-instance Syntactic (Beta sym 'None ('Const a)) where
-    type Domain   (Beta sym 'None ('Const a)) = sym
-    type Internal (Beta sym 'None ('Const a)) = 'Const a
+instance Syntactic (Beta sym ('Const a)) where
+    type Domain   (Beta sym ('Const a)) = sym
+    type Internal (Beta sym ('Const a)) = 'Const a
     sugar   = id
     desugar = Spine
 
-instance Syntactic (Eta sym 'None ('Const a)) where
-    type Domain   (Eta sym 'None ('Const a)) = sym
-    type Internal (Eta sym 'None ('Const a)) = 'Const a
+instance Syntactic (Eta sym ('Const a)) where
+    type Domain   (Eta sym ('Const a)) = sym
+    type Internal (Eta sym ('Const a)) = 'Const a
     sugar   = Spine
     desugar = id
 

@@ -10,9 +10,9 @@ module Language.Diorite.Decoration
     ) where
 
 import Language.Diorite.Syntax
-    ( Sig, Sym(..), Beta(..), Eta(..)
-    , SmartBeta, SmartSig, SmartSym
-    , Project(..), (:<:)(..), smartSym')
+    ( Sig, Sym(..), Beta(..), Eta(..), SmartBeta, SmartSig, SmartSym
+    , Project(..), (:<:)(..), smartSym'
+    )
 import Language.Diorite.Interpretation (Render(..))
 import Language.Diorite.Traversal (Result)
 
@@ -37,36 +37,6 @@ instance Sym sym => Sym (sym :&: info) where
 instance Project sub sup => Project sub (sup :&: info) where
     prj = prj . _sym
 
---------------------------------------------------------------------------------
-
--- | Decorate every node in an "AST" according to 'f'.
-decorate :: forall sym info rs sig
-    .  (forall a . sym a -> info (Result a))
-    -> Beta sym rs sig -> Beta (sym :&: info) rs sig
-decorate _ (Var n)     = Var n
-decorate f (Sym s)     = Sym (s :&: f s)
-decorate f (b :# p)    = decorate f b :# p
-decorate f (b :$ e)    = decorate f b :$ decorateEta e
-  where
-    decorateEta :: forall p a . Eta sym p a -> Eta (sym :&: info) p a
-    decorateEta (n :\  e') = n :\  decorateEta e'
-    decorateEta (p :\\ e') = p :\\ decorateEta e'
-    decorateEta (Spine b') = Spine (decorate f b')
-decorate f (Local b p) = Local (decorate f b) p
-
--- | Strip decorations from every node in an "AST".
-strip :: Beta (sym :&: info) rs sig -> Beta sym rs sig
-strip (Var n)  = Var n
-strip (Sym s)  = Sym (_sym s)
-strip (b :# p) = strip b :# p
-strip (b :$ e) = strip b :$ stripEta e
-  where
-    stripEta :: Eta (sym :&: info) rs sig -> Eta sym rs sig
-    stripEta (n :\  e') = n :\  stripEta e'
-    stripEta (p :\\ e') = p :\\ stripEta e'
-    stripEta (Spine b') = Spine (strip b')
-strip (Local b p) = Local (strip b) p
-
 -- | Make a "smart" constructor for a symbol decorated with some information.
 smartSymDecor :: forall sup sub info sig f
     .  ( Sig sig
@@ -77,6 +47,34 @@ smartSymDecor :: forall sup sub info sig f
        )
     => info (Result sig) -> sub sig -> f
 smartSymDecor d = smartSym' . (:&: d) . inj
+
+--------------------------------------------------------------------------------
+
+-- | Decorate every node in an "AST" according to 'f'.
+decorate :: forall sym info sig
+    .  (forall a . sym a -> info (Result a))
+    -> Beta sym sig -> Beta (sym :&: info) sig
+decorate _ (Var n)     = Var n
+decorate f (Sym s)     = Sym (s :&: f s)
+decorate f (b :# p)    = decorate f b :# p
+decorate f (b :$ e)    = decorate f b :$ decorateEta e
+  where
+    decorateEta :: forall a . Eta sym a -> Eta (sym :&: info) a
+    decorateEta (n :\  e') = n :\  decorateEta e'
+    decorateEta (p :\\ e') = p :\\ decorateEta e'
+    decorateEta (Spine b') = Spine (decorate f b')
+
+-- | Strip decorations from every node in an "AST".
+strip :: Beta (sym :&: info) sig -> Beta sym sig
+strip (Var n)  = Var n
+strip (Sym s)  = Sym (_sym s)
+strip (b :# p) = strip b :# p
+strip (b :$ e) = strip b :$ stripEta e
+  where
+    stripEta :: Eta (sym :&: info) sig -> Eta sym sig
+    stripEta (n :\  e') = n :\  stripEta e'
+    stripEta (p :\\ e') = p :\\ stripEta e'
+    stripEta (Spine b') = Spine (strip b')
 
 --------------------------------------------------------------------------------
 -- Fin.

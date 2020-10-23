@@ -38,7 +38,7 @@ module Language.Diorite.Region where
     , (@@)
     ) where
 -}
-
+{-
 import Language.Diorite.Syntax
 import Language.Diorite.Interpretation (Render(..))
 import Language.Diorite.Traversal (Args(..), Result, constMatch)
@@ -54,11 +54,11 @@ import qualified Control.Monad.State as S (get, put, evalState)
 
 import Prelude hiding (lookup)
 import qualified Prelude as P (lookup)
-
+-}
 --------------------------------------------------------------------------------
 -- * ...
 --------------------------------------------------------------------------------
-
+{-
 -- | Name of a region, associated with one or more places.
 type Region = Name
 
@@ -82,7 +82,7 @@ instance TestErasure SigRep where
         (Refl :: a :~: b) <- eqT; return (Erased Refl)
     testErasure (SigPart a b) (SigPart c d) = do
         testErasure a c |~ testErasure b d |~ return (Erased Refl)
-    testErasure sig (SigPred a) = do
+    testErasure sig (SigPred _ a) = do
         testErasure sig a |~ return (Erased Refl)
     testErasure _ _ = Nothing
 
@@ -91,11 +91,11 @@ instance TestErasure SigRep where
   -- Note: 'Erasure' being a type family seems to prevent a 'HasDict' instance.
 
 infixr |~
-
+-}
 --------------------------------------------------------------------------------
 -- * ...
 --------------------------------------------------------------------------------
-
+{-
 class (TestEquality rep, Typeable a) => Representable rep (a :: *) where
     represent :: rep a
 
@@ -116,7 +116,7 @@ instance TestErasure (TypeRep r) where
 -- | ...
 witType :: TypeRep r sig -> Dict (Sig sig)
 witType = witSig . symbol
-
+-}
 --------------------------------------------------------------------------------
 -- * Region inference.
 --------------------------------------------------------------------------------
