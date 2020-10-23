@@ -1,5 +1,7 @@
 {-# OPTIONS_GHC -Wall #-}
 
+{-# LANGUAGE UndecidableInstances #-}
+
 module Language.Diorite.Sugar
     (
     -- * Syntactic sugaring.
@@ -20,8 +22,8 @@ import Language.Diorite.Syntax
 
 -- | Syntactic sugaring for 'AST' embeddings.
 class Syntactic a where
-    type Domain a   :: Signature * * -> *
-    type Internal a :: Signature * *
+    type Domain a   :: Signature p * -> *
+    type Internal a :: Signature p *
     sugar   :: Beta (Domain a) (Internal a) -> a
     desugar :: a -> Eta (Domain a) (Internal a)
 
@@ -40,23 +42,23 @@ resugar = sugar . tail' . desugar
     tail' (Spine b) = b
 
 instance Syntactic (Beta sym ('Const a)) where
-    type Domain   (Beta sym ('Const a)) = sym
+    type Domain (Beta sym ('Const a))   = sym
     type Internal (Beta sym ('Const a)) = 'Const a
     sugar   = id
     desugar = Spine
 
 instance Syntactic (Eta sym ('Const a)) where
-    type Domain   (Eta sym ('Const a)) = sym
+    type Domain (Eta sym ('Const a))   = sym
     type Internal (Eta sym ('Const a)) = 'Const a
     sugar   = Spine
     desugar = id
 
--- | Syntactic functions.
-instance
+instance forall a b .
     ( Syntactic a
     , Syntactic b
     , Domain a ~ Domain b
     , Sig (Internal a)
+    --
     )
     => Syntactic (a -> b)
   where
