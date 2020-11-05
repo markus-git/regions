@@ -1,12 +1,13 @@
 {-# OPTIONS_GHC -Wall #-}
 
 {-# LANGUAGE UndecidableInstances #-}
+--{-# LANGUAGE AllowAmbiguousTypes #-}
 
 module Language.Diorite.Sugar
     (
     -- * Syntactic sugaring.
       Syntactic(..)
-    , resugar
+--    , resugar
     , sugarSym
     ) where
 
@@ -14,7 +15,7 @@ module Language.Diorite.Sugar
 --   https://emilaxelsson.github.io/documents/axelsson2013using.pdf
 
 import Language.Diorite.Syntax
-    (Signature(..), Sig(..), Beta(..), Eta(..), lam)
+    (Signature(..), Pred, Sig(..), Beta(..), Eta(..), lam)
 
 --------------------------------------------------------------------------------
 -- * Syntactic sugaring.
@@ -26,20 +27,6 @@ class Syntactic a where
     type Internal a :: Signature p *
     sugar   :: Beta (Domain a) (Internal a) -> a
     desugar :: a -> Eta (Domain a) (Internal a)
-
--- | Syntactic type casting.
-resugar ::
-    ( Syntactic a
-    , Syntactic b
-    , Domain a ~ Domain b
-    , Internal a ~ Internal b
-    , Internal a ~ 'Const a
-    )
-    => a -> b
-resugar = sugar . tail' . desugar
-  where
-    tail' :: Eta (Domain a) ('Const a) -> Beta (Domain a) ('Const a)
-    tail' (Spine b) = b
 
 instance Syntactic (Beta sym ('Const a)) where
     type Domain (Beta sym ('Const a))   = sym
@@ -53,12 +40,11 @@ instance Syntactic (Eta sym ('Const a)) where
     sugar   = Spine
     desugar = id
 
-instance forall a b .
+instance
     ( Syntactic a
     , Syntactic b
     , Domain a ~ Domain b
     , Sig (Internal a)
-    --
     )
     => Syntactic (a -> b)
   where
@@ -66,6 +52,19 @@ instance forall a b .
     type Internal (a -> b) = Internal a ':-> Internal b
     sugar   f = sugar . (f :$) . desugar
     desugar f = lam (desugar . f . sugar)
+
+-- | Syntactic type casting.
+resugar ::
+    ( Syntactic a
+    , Syntactic b
+    , Domain a ~ Domain b
+    , Internal a ~ Internal b
+    )
+    => a -> b
+resugar = sugar . tail' . desugar
+  where
+    tail' :: Eta (Domain a) ('Const a) -> Beta (Domain a) ('Const a)
+    tail' (Spine b) = b
 
 -- | Sugared symbol application.
 sugarSym :: Syntactic a => Domain a (Internal a) -> a

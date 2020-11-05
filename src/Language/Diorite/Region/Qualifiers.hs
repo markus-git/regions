@@ -14,7 +14,8 @@ module Language.Diorite.Region.Qualifiers where
 
 import qualified Language.Diorite.Syntax as S (Signature(..), SigRep(..))
 
-import Data.Typeable (Typeable)
+import Data.Type.Equality ((:~:)(..))
+import Data.Typeable (Typeable, eqT)
 import Data.Proxy (Proxy(..))
 
 --------------------------------------------------------------------------------
@@ -26,10 +27,18 @@ data Put r = Put r
 
 -- ...
 
+{-
+-- | Collection of predicates of a region-qualified symbol.
+data Qualifiers r = Put r :- Qualifiers r | None
+
+infixr :-
+-}
+
 --------------------------------------------------------------------------------
 -- * Annotated signatures.
 --------------------------------------------------------------------------------
 
+-- | Signature annotated with regions.
 data Annotation r a =
          Const a
        | Annotation r a :-> Annotation r a
@@ -40,7 +49,7 @@ infixr 2 :->, :=>
 infixl 1 :^
 
 -- | The 'erasure' of a annotated signature removes any constraints and labels.
-type family Erasure (ann :: Annotation r *) where
+type family Erasure (ann :: Annotation r *) :: Annotation r * where
     Erasure ('Const a) = 'Const a
     Erasure (a ':-> b) = Erasure a ':-> Erasure b
     Erasure (_ ':=> a) = Erasure a
@@ -53,8 +62,14 @@ type family Strip (ann :: Annotation r *) :: S.Signature (Put r) * where
     Strip (p ':=> a) = p 'S.:=> Strip a
     Strip (a ':^ _)  = Strip a
 
---------------------------------------------------------------------------------
+-- | Witness of equality under "Erasure".
+newtype sig :~~: ann = Erased (sig :~: Strip (Erasure ann))
 
+infixr :~~:
+
+--------------------------------------------------------------------------------
+-- ** ...
+  
 -- | ...
 data AnnRep (ann :: Annotation r *) where
     AnnConst :: Typeable a => AnnRep ('Const a)
@@ -85,30 +100,14 @@ erase (AnnPart a b) = S.SigPart (erase a) (erase b)
 erase (AnnPred p a) = S.SigPred p (erase a)
 erase (AnnAt a)     = erase a
 
+-- | ...
+testErasure :: S.SigRep a -> AnnRep b -> Maybe (a :~~: b)
+testErasure (S.SigConst :: S.SigRep a) (AnnConst :: AnnRep b) = do
+    (Refl :: a :~: b) <- eqT; return (Erased Refl)
+
 --------------------------------------------------------------------------------
-{-
--- | Location names, associated with a "Put" predicate on an 'r'.
-type Place r = Int
+-- ** ...
 
--- | Collection of predicates of a region-qualified symbol.
-data Qualifiers r = Put r :- Qualifiers r | None
-  -- todo: Use an actual collection, rather than a list.
+-- data Label sig = forall ann . Ann ann => Label (sig :~~: ann)
 
-infixr :-
-
--- | Witness of a symbol constraint.
-data QualRep (ps :: Qualifiers *) where
-    QualNone :: QualRep ('None)
-    QualPred :: Proxy p -> QualRep ps -> QualRep ('Put p ':- ps)
-
--- | Valid symbol constraints.
-class Qual (ps :: Qualifiers *) where
-    qualifier :: QualRep ps
-
-instance Qual ('None) where
-    qualifier = QualNone
-
-instance Qual ps => Qual ('Put p ':- ps) where
-    qualifier = QualPred Proxy qualifier
--}
 --------------------------------------------------------------------------------

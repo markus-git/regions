@@ -9,6 +9,7 @@ module Language.Diorite.Syntax
     -- * Signatures.
       Signature(..)
     , Result
+    , Pred
     , SigRep(..)
     , Sig(..)
     , witSig
@@ -63,6 +64,10 @@ type family Result (sig :: Signature p *) where
     Result ('Const a) = a
     Result (a ':-> b) = Result b
     Result (p ':=> a) = Result a
+
+-- | Predicates associated with a signature.
+type family Pred (sig :: Signature p *) :: * where
+    Pred (sig :: Signature p *) = p
 
 --------------------------------------------------------------------------------
 
