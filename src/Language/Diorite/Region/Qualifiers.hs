@@ -28,10 +28,6 @@ data Put r = Put r
 -- ...
 
 {-
--- | Collection of predicates of a region-qualified symbol.
-data Qualifiers r = Put r :- Qualifiers r | None
-
-infixr :-
 -}
 
 --------------------------------------------------------------------------------
