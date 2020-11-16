@@ -30,8 +30,7 @@ module Language.Diorite.Syntax
     , Sym(..)
     , lam
     -- * "Smart" constructors.
-    , SmartBeta
-    , SmartEta
+    , SmartFun
     , SmartSig
     , SmartSym
     , smartSym'
@@ -77,6 +76,7 @@ type family Pred (sig :: Signature p *) :: * where
 
 --------------------------------------------------------------------------------
 -- ** Rep. of a valid signature.
+--------------------------------------------------------------------------------
 
 -- | Witness of a symbol signature.
 data SigRep (sig :: Signature p *) where
@@ -130,6 +130,7 @@ type family Minus qs q where
 
 --------------------------------------------------------------------------------
 -- ** Rep. of a valid qualifier.
+--------------------------------------------------------------------------------
 
 -- | Witness of a symbol qualifier.
 data QualRep (qs :: Qualifier p) where
@@ -199,18 +200,18 @@ class Sym sym where
 --------------------------------------------------------------------------------
 
 -- | Get the highest name bound for 'Eta' node.
-maxLamEta :: Eta sym q a -> Name
+maxLamEta :: Eta sym qs a -> Name
 maxLamEta (n :\ _)  = n
 maxLamEta (_ :\\ e) = maxLamEta e
 maxLamEta (Spine b) = maxLamBeta b
   where
-    maxLamBeta :: Beta sym q a -> Name
+    maxLamBeta :: Beta sym qs a -> Name
     maxLamBeta (beta :$ eta) = maxLamBeta beta `Prelude.max` maxLamEta eta
     maxLamBeta (beta :# _)   = maxLamBeta beta
     maxLamBeta _             = 0
 
 -- | Interface for variable binding.
-lam :: Sig a => (Beta sym q a -> Eta sym q b) -> Eta sym q (a ':-> b)
+lam :: Sig a => (Beta sym qs a -> Eta sym qs b) -> Eta sym qs (a ':-> b)
 lam f = v :\ body
   where
     v    = maxLamEta body + 1
@@ -221,16 +222,10 @@ lam f = v :\ body
 --------------------------------------------------------------------------------
 
 -- | Map a symbol to its corresponding "smart" constructor.
-type family SmartBeta (sym :: Signature p * -> *) (sig :: Signature p *) where
-    SmartBeta sym ('Const a)   = ASTF sym 'None a
-    SmartBeta sym (a ':-> sig) = SmartEta sym a -> SmartBeta sym sig
---  SmartBeta sym (p ':=> sig) = p => SmartBeta sym sig
-
--- | Map an argument to its ...
-type family SmartEta (sym :: Signature p * -> *) (sig :: Signature p *) where
-    SmartEta sym ('Const a)   = ASTF sym 'None a
-    SmartEta sym (a ':-> sig) = AST sym 'None a -> SmartEta sym sig
---  SmartEta sym (p ':=> sig) = p => SmartEta sym sig
+type family SmartFun (sym :: Signature p * -> *) (sig :: Signature p *) where
+    SmartFun sym ('Const a)   = Beta sym 'None ('Const a)
+    SmartFun sym (a ':-> sig) = SmartFun sym a -> SmartFun sym sig
+--  SmartFun sym (p ':=> sig) = p => SmartFun sym sig
 
 -- | Reconstruct a symbol's signature.
 type family SmartSig f :: Signature p * where
@@ -238,49 +233,29 @@ type family SmartSig f :: Signature p * where
     SmartSig (a -> f)       = SmartSig a ':-> SmartSig f
 --  SmartSig (p => f)       = SmartSig f
 
--- | Reconstruct a symbol's qualifiers.
-type family SmartQual f :: Qualifier p where
-    SmartQual (AST sym qs a) = qs
-    SmartQual (a -> f)       = SmartQual f
---  SmartQual (p => f)       = p ':- SmartQual f
-
 -- | Fetch the symbol of a "smart" constructor.
 type family SmartSym f :: Signature p * -> * where
     SmartSym (AST sym qs a) = sym
     SmartSym (a -> f)       = SmartSym f
 --  SmartSym (p => f)       = SmartSym f
 
-{-
-data Sym a where
-    Int :: Sym (Int)
-    Add :: Sym (Int -> Int -> 'Int)
-    Let :: Sym (Int -> (Int -> Int) -> Int)
-    X   :: Sym (((Int -> Int) -> Int) -> Int)
-
-smartSym' Add :: ASTF Int -> ASTF Int -> ASTF Int
-smartSym' Let :: ASTF Int -> (ASTF Int -> ASTF Int) -> ASTF Int
-
--}
-
 -- | Make a "smart" constructor for a symbol.
 smartSym' :: forall sym sig f
     .  ( Sig sig
-       , f   ~ SmartBeta sym sig
+       , f   ~ SmartFun sym sig
        , sig ~ SmartSig f
        , sym ~ SmartSym f
        )
     => sym sig -> f
 smartSym' sym = smartBeta (signature :: SigRep sig) (Sym sym)
   where
-    smartBeta :: forall a . SigRep a -> Beta sym 'None a -> SmartBeta sym a
-    smartBeta (SigConst)      ast = ast
-    smartBeta (SigPart a sig) ast = \f -> smartBeta sig (ast :$ smartEta a f)
-    smartBeta (SigPred _ _)   _   = error "todo."
+    smartBeta :: forall a . SigRep a -> Beta sym 'None a -> SmartFun sym a
+    smartBeta (SigConst)    ast = ast
+    smartBeta (SigPart a b) ast = \f -> smartBeta b (ast :$ smartEta a f)
 
-    smartEta :: forall a . SigRep a -> SmartEta sym a -> Eta sym 'None a
-    smartEta (SigConst)      f = Spine f
-    smartEta (SigPart a sig) f = withDict (witSig a) (lam (smartEta sig . f))
-    smartEta (SigPred _ _)   _ = error "todo."
+    smartEta :: forall a . SigRep a -> SmartFun sym a -> Eta sym 'None a
+    smartEta (SigConst)    f = Spine f
+    smartEta (SigPart a b) f = withDict (witSig a) (lam (smartEta b . f . smartBeta a))
 
 --------------------------------------------------------------------------------
 -- * Open symbol domains.
@@ -347,13 +322,13 @@ instance {-# OVERLAPS #-} (sym1 :<: sym3) => (sym1 :<: (sym2 :+: sym3)) where
 -- | Make a "smart" constructor for a symbol.
 smartSym :: forall sup sub sig f
     .  ( Sig sig
-       , f   ~ SmartBeta sup sig
+       , f   ~ SmartFun sup sig
        , sig ~ SmartSig f
        , sup ~ SmartSym f
        , sub :<: sup
        )
     => sub sig -> f
-smartSym = smartSym' . inj
+smartSym = undefined --smartSym' . inj
 
 --------------------------------------------------------------------------------
 -- ** Utils.
