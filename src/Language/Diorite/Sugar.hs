@@ -1,21 +1,22 @@
 {-# OPTIONS_GHC -Wall #-}
 
 {-# LANGUAGE UndecidableInstances #-}
+--{-# LANGUAGE FunctionalDependencies #-}
 --{-# LANGUAGE AllowAmbiguousTypes #-}
 
 module Language.Diorite.Sugar
     (
     -- * Syntactic sugaring.
-      Syntactic(..)
+--      Syntactic(..)
 --    , resugar
-    , sugarSym
+--    , sugarSym
     ) where
 
 -- Related stuff:
 --   https://emilaxelsson.github.io/documents/axelsson2013using.pdf
 
 import Language.Diorite.Syntax
-    (Signature(..), Pred, Sig(..), Beta(..), Eta(..), lam)
+    (Signature(..), Sig(..), Qualifier(..), Both, Beta(..), Eta(..), lam)
 
 --------------------------------------------------------------------------------
 -- * Syntactic sugaring.
@@ -25,20 +26,25 @@ import Language.Diorite.Syntax
 class Syntactic a where
     type Domain a   :: Signature p * -> *
     type Internal a :: Signature p *
-    sugar   :: Beta (Domain a) (Internal a) -> a
-    desugar :: a -> Eta (Domain a) (Internal a)
+    sugar   :: Beta (Domain a) 'None (Internal a) -> a
+    desugar :: a -> Eta (Domain a) 'None (Internal a)
 
-instance Syntactic (Beta sym ('Const a)) where
-    type Domain (Beta sym ('Const a))   = sym
-    type Internal (Beta sym ('Const a)) = 'Const a
+instance Syntactic (Beta sym 'None ('Const a)) where
+    type Domain (Beta sym 'None ('Const a))   = sym
+    type Internal (Beta sym 'None ('Const a)) = 'Const a
     sugar   = id
     desugar = Spine
 
-instance Syntactic (Eta sym ('Const a)) where
-    type Domain (Eta sym ('Const a))   = sym
-    type Internal (Eta sym ('Const a)) = 'Const a
+instance Syntactic (Eta sym 'None ('Const a)) where
+    type Domain (Eta sym 'None ('Const a))   = sym
+    type Internal (Eta sym 'None ('Const a)) = 'Const a
     sugar   = Spine
     desugar = id
+
+--------------------------------------------------------------------------------
+type family PofS (sig :: Signature p *) :: * where PofS (sig :: Signature p *) = p
+type family PofQ (qs :: Qualifier p) :: * where PofQ (qs :: Qualifier p) = p
+--------------------------------------------------------------------------------
 
 instance
     ( Syntactic a
@@ -48,11 +54,11 @@ instance
     )
     => Syntactic (a -> b)
   where
-    type Domain (a -> b)   = Domain a
-    type Internal (a -> b) = Internal a ':-> Internal b
-    sugar   f = sugar . (f :$) . desugar
+    type Domain (a -> b)    = Domain a
+    type Internal (a -> b)  = Internal a ':-> Internal b
+    sugar f   = sugar . (f :$) . desugar
     desugar f = lam (desugar . f . sugar)
-
+{-
 -- | Syntactic type casting.
 resugar ::
     ( Syntactic a
@@ -63,12 +69,12 @@ resugar ::
     => a -> b
 resugar = sugar . tail' . desugar
   where
-    tail' :: Eta (Domain a) ('Const a) -> Beta (Domain a) ('Const a)
+    tail' :: Eta (Domain a) 'None ('Const a) -> Beta (Domain a) 'None ('Const a)
     tail' (Spine b) = b
 
 -- | Sugared symbol application.
 sugarSym :: Syntactic a => Domain a (Internal a) -> a
 sugarSym = sugar . Sym
-
+-}
 --------------------------------------------------------------------------------
 -- Fin.

@@ -9,7 +9,6 @@ module Language.Diorite.Syntax
     -- * Signatures.
       Signature(..)
     , Result
-    , Pred
     , SigRep(..)
     , Sig(..)
     , witSig
@@ -70,13 +69,8 @@ type family Result (sig :: Signature p *) where
     Result (a ':-> b) = Result b
     Result (p ':=> a) = Result a
 
--- | Predicates associated with a signature.
-type family Pred (sig :: Signature p *) :: * where
-    Pred (sig :: Signature p *) = p
-
 --------------------------------------------------------------------------------
 -- ** Rep. of a valid signature.
---------------------------------------------------------------------------------
 
 -- | Witness of a symbol signature.
 data SigRep (sig :: Signature p *) where
@@ -130,7 +124,6 @@ type family Minus qs q where
 
 --------------------------------------------------------------------------------
 -- ** Rep. of a valid qualifier.
---------------------------------------------------------------------------------
 
 -- | Witness of a symbol qualifier.
 data QualRep (qs :: Qualifier p) where
@@ -198,6 +191,7 @@ class Sym sym where
     symbol :: sym sig -> SigRep sig
 
 --------------------------------------------------------------------------------
+-- ** ...
 
 -- | Get the highest name bound for 'Eta' node.
 maxLamEta :: Eta sym qs a -> Name
@@ -219,25 +213,24 @@ lam f = v :\ body
 
 --------------------------------------------------------------------------------
 -- ** "Smart" constructors.
---------------------------------------------------------------------------------
 
 -- | Map a symbol to its corresponding "smart" constructor.
 type family SmartFun (sym :: Signature p * -> *) (sig :: Signature p *) where
-    SmartFun sym ('Const a)   = Beta sym 'None ('Const a)
-    SmartFun sym (a ':-> sig) = SmartFun sym a -> SmartFun sym sig
---  SmartFun sym (p ':=> sig) = p => SmartFun sym sig
+    SmartFun sym ('Const a) = Beta sym 'None ('Const a)
+    SmartFun sym (a ':-> b) = SmartFun sym a -> SmartFun sym b
+--  SmartFun sym (p ':=> a) = p => SmartFun sym a
 
 -- | Reconstruct a symbol's signature.
 type family SmartSig f :: Signature p * where
-    SmartSig (AST sym qs a) = a
-    SmartSig (a -> f)       = SmartSig a ':-> SmartSig f
---  SmartSig (p => f)       = SmartSig f
+    SmartSig (AST s q a) = a
+    SmartSig (a -> f)    = SmartSig a ':-> SmartSig f
+--  SmartSig (p => f)    = SmartSig f
 
 -- | Fetch the symbol of a "smart" constructor.
 type family SmartSym f :: Signature p * -> * where
-    SmartSym (AST sym qs a) = sym
-    SmartSym (a -> f)       = SmartSym f
---  SmartSym (p => f)       = SmartSym f
+    SmartSym (AST s q a) = s
+    SmartSym (a -> f)    = SmartSym f
+--  SmartSym (p => f)    = SmartSym f
 
 -- | Make a "smart" constructor for a symbol.
 smartSym' :: forall sym sig f
@@ -252,10 +245,12 @@ smartSym' sym = smartBeta (signature :: SigRep sig) (Sym sym)
     smartBeta :: forall a . SigRep a -> Beta sym 'None a -> SmartFun sym a
     smartBeta (SigConst)    ast = ast
     smartBeta (SigPart a b) ast = \f -> smartBeta b (ast :$ smartEta a f)
+    smartBeta (SigPred _ _) _   = error "todo:smartSym'"
 
     smartEta :: forall a . SigRep a -> SmartFun sym a -> Eta sym 'None a
     smartEta (SigConst)    f = Spine f
     smartEta (SigPart a b) f = withDict (witSig a) (lam (smartEta b . f . smartBeta a))
+    smartEta (SigPred _ _) _ = error "todo:smartSym'"
 
 --------------------------------------------------------------------------------
 -- * Open symbol domains.
@@ -328,7 +323,7 @@ smartSym :: forall sup sub sig f
        , sub :<: sup
        )
     => sub sig -> f
-smartSym = undefined --smartSym' . inj
+smartSym = smartSym' . inj
 
 --------------------------------------------------------------------------------
 -- ** Utils.

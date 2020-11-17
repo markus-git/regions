@@ -10,11 +10,11 @@ module Language.Diorite.Decoration
     ) where
 
 import Language.Diorite.Syntax
-    ( Sig, Sym(..), Beta(..), Eta(..), SmartBeta, SmartSig, SmartSym
+    ( Result, Sig, Sym(..), Beta(..), Eta(..)
+    , SmartFun, SmartSig, SmartSym
     , Project(..), (:<:)(..), smartSym'
     )
 import Language.Diorite.Interpretation (Render(..))
-import Language.Diorite.Traversal (Result)
 
 --------------------------------------------------------------------------------
 -- * Decorated symbols.
@@ -40,7 +40,7 @@ instance Project sub sup => Project sub (sup :&: info) where
 -- | Make a "smart" constructor for a symbol decorated with some information.
 smartSymDecor :: forall sup sub info sig f
     .  ( Sig sig
-       , f              ~ SmartBeta (sup :&: info) sig
+       , f              ~ SmartFun (sup :&: info) sig
        , sig            ~ SmartSig f
        , (sup :&: info) ~ SmartSym f
        , sub :<: sup
@@ -51,27 +51,27 @@ smartSymDecor d = smartSym' . (:&: d) . inj
 --------------------------------------------------------------------------------
 
 -- | Decorate every node in an "AST" according to 'f'.
-decorate :: forall sym info sig
+decorate :: forall sym info qs sig
     .  (forall a . sym a -> info (Result a))
-    -> Beta sym sig -> Beta (sym :&: info) sig
+    -> Beta sym qs sig -> Beta (sym :&: info) qs sig
 decorate _ (Var n)     = Var n
 decorate f (Sym s)     = Sym (s :&: f s)
 decorate f (b :# p)    = decorate f b :# p
 decorate f (b :$ e)    = decorate f b :$ decorateEta e
   where
-    decorateEta :: forall a . Eta sym a -> Eta (sym :&: info) a
+    decorateEta :: forall ps a . Eta sym ps a -> Eta (sym :&: info) ps a
     decorateEta (n :\  e') = n :\  decorateEta e'
     decorateEta (p :\\ e') = p :\\ decorateEta e'
     decorateEta (Spine b') = Spine (decorate f b')
 
 -- | Strip decorations from every node in an "AST".
-strip :: Beta (sym :&: info) sig -> Beta sym sig
+strip :: Beta (sym :&: info) qs sig -> Beta sym qs sig
 strip (Var n)  = Var n
 strip (Sym s)  = Sym (_sym s)
 strip (b :# p) = strip b :# p
 strip (b :$ e) = strip b :$ stripEta e
   where
-    stripEta :: Eta (sym :&: info) sig -> Eta sym sig
+    stripEta :: Eta (sym :&: info) qs sig -> Eta sym qs sig
     stripEta (n :\  e') = n :\  stripEta e'
     stripEta (p :\\ e') = p :\\ stripEta e'
     stripEta (Spine b') = Spine (strip b')
