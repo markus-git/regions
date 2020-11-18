@@ -1,48 +1,34 @@
 {-# OPTIONS_GHC -Wall #-}
 
-{-# LANGUAGE ConstraintKinds        #-}
-{-# LANGUAGE FunctionalDependencies #-}
-
-module Language.Diorite.Region where
-{-
+module Language.Diorite.Region
     (
-    -- * Valid primitive types.
-      Erasure
+    -- * ...
+      Put(..)
+    , Annotation(..)
+    , Strip
+    , Erasure
     , (:~~:)(..)
+    -- ** ...
+    , AnnRep(..)
+    , Ann(..)
+    , strip
+    , erase
+    , testAnn
     -- * ...
-    , Region
-    , Local(..)
-    -- * ...
-    , Representable(..)
-    , TypeRep(..)
-    -- * Region inference.
-    , InferSym(..)
-    , infer
-    , inferM
-    -- * ...
-    , M
-    , Store
-    , Context
-    , Sub
-    , Free(..)
-    , Substitute(..)
-    , Fresh(..)
-    , newName
-    , newNames
-    , store
-    , freeS
-    , freeL
-    , subR
-    , subS
-    , subC
-    , (@@)
     ) where
--}
-{-
-import Language.Diorite.Syntax
-import Language.Diorite.Interpretation (Render(..))
-import Language.Diorite.Traversal (Args(..), Result, constMatch)
 
+import Language.Diorite.Syntax (Qual, (:-), Minus, Beta)
+--import Language.Diorite.Decoration ((:&:)(..))
+--import Language.Diorite.Interpretation (Render(..))
+--import Language.Diorite.Traversal (Args(..), constMatch)
+import qualified Language.Diorite.Syntax as S
+--import qualified Language.Diorite.Decoration as S
+
+import Data.Type.Equality ((:~:)(..))
+import Data.Typeable (Typeable)
+import Data.Proxy (Proxy(..))
+
+{-
 import Data.Maybe (fromJust)
 import Data.Constraint (Dict(..), withDict)
 import Data.Type.Equality ((:~:)(..), TestEquality(..))
@@ -73,21 +59,21 @@ data Annotation r a =
 infixr 2 :->, :=>
 infixl 1 :^
 
--- | The 'erasure' of a annotated signature removes any constraints and labels.
-type family Erasure (ann :: Annotation r *) :: Annotation r * where
-    Erasure ('Const a) = 'Const a
-    Erasure (a ':-> b) = Erasure a ':-> Erasure b
-    Erasure (_ ':=> a) = Erasure a
-    Erasure (a ':^ _)  = Erasure a
-
 -- | ...
 type family Strip (ann :: Annotation r *) :: S.Signature (Put r) * where
     Strip ('Const a) = 'S.Const a
     Strip (a ':-> b) = Strip a 'S.:-> Strip b
     Strip (p ':=> a) = p 'S.:=> Strip a
+    Strip (a ':^ _)  = Strip a
+
+-- | ...
+type family Erasure (sig :: S.Signature (Put r) *) :: S.Signature (Put r) * where
+    Erasure ('S.Const a) = 'S.Const a
+    Erasure (a 'S.:-> b) = Erasure a 'S.:-> Erasure b
+    Erasure (_ 'S.:=> a) = Erasure a
 
 -- | Witness of equality under "Erasure".
-newtype sig :~~: ann = Erased (sig :~: Strip (Erasure ann))
+newtype sig :~~: ann = Erased (sig :~: Erasure (Strip ann))
 
 infixr :~~:
 
@@ -118,82 +104,58 @@ instance Ann ann => Ann (ann ':^ r) where
     annotation = AnnAt annotation
 
 -- | ...
-erase :: AnnRep ann -> S.SigRep (Strip ann)
-erase (AnnConst)    = S.SigConst
-erase (AnnPart a b) = S.SigPart (erase a) (erase b)
-erase (AnnPred p a) = S.SigPred p (erase a)
-erase (AnnAt a)     = erase a
+strip :: AnnRep ann -> S.SigRep (Strip ann)
+strip (AnnConst)    = S.SigConst
+strip (AnnPart a b) = S.SigPart (strip a) (strip b)
+strip (AnnPred p a) = S.SigPred p (strip a)
+strip (AnnAt a)     = strip a
 
 -- | ...
-testErasure :: S.SigRep a -> AnnRep b -> Maybe (a :~~: b)
-testErasure (S.SigConst :: S.SigRep a) (AnnConst :: AnnRep b) = do
-    (Refl :: a :~: b) <- eqT; return (Erased Refl)
+erase :: S.SigRep sig -> S.SigRep (Erasure sig)
+erase (S.SigConst)    = S.SigConst
+erase (S.SigPart a b) = S.SigPart (erase a) (erase b)
+erase (S.SigPred _ a) = erase a
 
---------------------------------------------------------------------------------
--- * ...
---------------------------------------------------------------------------------
+-- | ...
+testAnn :: S.SigRep a -> AnnRep b -> Maybe (a :~~: b)
+testAnn sig ann | Just Refl <- S.testSig sig (erase (strip ann)) = Just (Erased Refl)
+testAnn _ _ = Nothing
+
 {-
--- | Name of a region, associated with one or more places.
-type Region = Name
-
--- | Erasure of any "Put" predicates of a symbol's signature.
-type family Erasure a where
-    Erasure ('Const a) = 'Const a
-    Erasure (a ':-> b) = Erasure a ':-> Erasure b
-    Erasure (p ':=> a) = Erasure a
-
--- | Witness of equality under "Erasure" of second signature.
-newtype sig :~~: sig' = Erased (sig :~: Erasure sig')
-
-infixr :~~:
-
--- | Extract a witness of equality of a type and its erasure.
-class TestErasure f where
-    testErasure :: f a -> f b -> Maybe (a :~~: b)
-
-instance TestErasure SigRep where
-    testErasure (SigConst :: SigRep a) (SigConst :: SigRep b) = do
-        (Refl :: a :~: b) <- eqT; return (Erased Refl)
-    testErasure (SigPart a b) (SigPart c d) = do
-        testErasure a c |~ testErasure b d |~ return (Erased Refl)
-    testErasure sig (SigPred _ a) = do
-        testErasure sig a |~ return (Erased Refl)
-    testErasure _ _ = Nothing
-
 (|~) :: Maybe (a :~~: b) -> (a ~ Erasure b => Maybe c) -> Maybe c
 (|~) m a = do (Erased Refl) <- m;  a
-  -- Note: 'Erasure' being a type family seems to prevent a 'HasDict' instance.
+  -- note: 'Erasure' being a type family seems to prevent a 'HasDict' instance.
 
 infixr |~
 -}
+
 --------------------------------------------------------------------------------
 -- * ...
 --------------------------------------------------------------------------------
-{-
-class (TestEquality rep, Typeable a) => Representable rep (a :: *) where
-    represent :: rep a
 
-data TypeRep (rep :: * -> *) (sig :: Signature (Put *) *) where
-    TypeConst :: Representable rep a => rep a -> TypeRep rep ('Const a)
-    TypePart  :: TypeRep rep a -> TypeRep rep sig -> TypeRep rep (a ':-> sig)
-    TypePred  :: Region -> TypeRep rep sig -> TypeRep rep ('Put r ':=> sig)
-  -- todo: Annotate lambdas with regions.
+data Rgn a where
+    Local :: Rgn (('Put r 'S.:=> a) 'S.:-> a) -- Matched by ev. abs.
+    At    :: Rgn (a 'S.:-> a)                 -- Only effect is in type?
 
-instance Sym (TypeRep r) where
-    symbol (TypeConst _)  = SigConst
-    symbol (TypePart a b) = SigPart (symbol a) (symbol b)
-    symbol (TypePred _ a) = SigPred (symbol a)
+local :: (Qual qs, qs :- p) => Proxy p -> Beta sym qs sig -> Beta sym (Minus qs p) sig
+local p beta = undefined
 
-instance TestErasure (TypeRep r) where
-    testErasure a b = testErasure (symbol a) (symbol b)
-
--- | ...
-witType :: TypeRep r sig -> Dict (Sig sig)
-witType = witSig . symbol
--}
 --------------------------------------------------------------------------------
--- * Region inference.
---------------------------------------------------------------------------------
+-- Fin.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 {-
 -- | ...
 class InferSym sub sup where
@@ -215,9 +177,9 @@ type Infer sub sup =
 infer :: forall sub sup a . (Infer sub sup, Typeable a) => ASTF sub a -> ASTF sup a
 infer ast = let (_, _, _, b) = runM (inferM [] ast) in b
   -- todo: Do not throw away the type.
--}
+
 --------------------------------------------------------------------------------
-{-
+
 -- | ...
 inferM :: forall sub sup a . (Infer sub sup, Typeable a)
     => Store (Prim sup) -> ASTF sub a
@@ -240,9 +202,9 @@ inferM env = constMatch annotate instantiate
         (Erased Refl) <- eqET (signature :: SigRep sig) (symbol t)
         return $ withDict (witType t) $
             reduceBeta env (Var name) t as
--}
+
 --------------------------------------------------------------------------------
-{-
+
 -- | ...
 reduceBeta :: forall sub sup s r a . (a ~ Result s, s ~ Erasure r, Infer sub sup)
   => Store (Prim sup) -> Beta sup r -> TypeRep (Prim sup) r -> Args (Eta sub) s
@@ -278,11 +240,9 @@ reduceEta env eta (TypePred _ a) = do
   return (s, (p, r) : c, TypePred r t, p :\\ e')
   -- todo: 'sig ~ Erasure rsig' means that we cannot have ':~' in the args.
   -- todo: Could interleave with reg. inference for tighter binds.
--}
+
 --------------------------------------------------------------------------------
--- ** ...
---------------------------------------------------------------------------------
-{-
+
 type Store r = [(Name, Ex (TypeRep r))] -- Variable store.
 type Context = [(Place, Region)]        -- Region store.
 type Sub     = [(Region,Region)]        -- Substitutions.
@@ -339,5 +299,3 @@ subC s = map (fmap (subR s))
 class Fresh f where
     fresh :: f a -> M (f a)
 -}           
---------------------------------------------------------------------------------
--- Fin.

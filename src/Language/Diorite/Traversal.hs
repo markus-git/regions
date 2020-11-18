@@ -59,7 +59,7 @@ constMatch :: forall sym qs a b
 constMatch f g = A.getConst . match (\s -> A.Const . f s) (\s -> A.Const . g s)
 
 newtype WrapBeta c sym qs sig = WrapBeta { unWrapBeta :: c (Beta sym qs sig) }
-  -- note: Only used in the definition of 'transMatch'.
+-- note: Only used in the definition of 'transMatch'.
 
 -- | A version of 'match' where the result is a transformed syntax tree, wrapped
 --   in some type constructor.

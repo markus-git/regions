@@ -11,6 +11,7 @@ module Language.Diorite.Syntax
     , Result
     , SigRep(..)
     , Sig(..)
+    , testSig
     , witSig
     , witTypeable
     -- * Qualifiers.
@@ -20,6 +21,7 @@ module Language.Diorite.Syntax
     , QualRep(..)
     , Qual(..)
     , (:-)(..)
+    , minus
     -- * Abstract syntax trees.
     , Name
     , Beta(..)
@@ -49,7 +51,8 @@ module Language.Diorite.Syntax
 
 import Data.Constraint (Dict(..), withDict)
 import Data.Proxy (Proxy(..))
-import Data.Typeable (Typeable)
+import Data.Type.Equality ((:~:)(..))
+import Data.Typeable (Typeable, eqT)
 
 --------------------------------------------------------------------------------
 -- * Signatures.
@@ -76,7 +79,7 @@ type family Result (sig :: Signature p *) where
 data SigRep (sig :: Signature p *) where
     SigConst :: Typeable a => SigRep ('Const a)
     SigPart  :: SigRep a -> SigRep sig -> SigRep (a ':-> sig)
-    SigPred  :: Proxy p -> SigRep sig -> SigRep (p ':=> sig)
+    SigPred  :: Typeable p => Proxy p -> SigRep sig -> SigRep (p ':=> sig)
 
 -- | Valid symbol signatures.
 class Sig (sig :: Signature p *) where
@@ -88,11 +91,25 @@ instance Typeable a => Sig ('Const a) where
 instance (Sig a, Sig sig) => Sig (a ':-> sig) where
     signature = SigPart signature signature
 
-instance Sig sig => Sig (p ':=> sig) where
+instance (Typeable p, Sig sig) => Sig (p ':=> sig) where
     signature = SigPred Proxy signature
 
+-- | ...
+testSig :: forall (a :: Signature p *) (b :: Signature p *) . SigRep a -> SigRep b -> Maybe (a :~: b)
+testSig x@(SigConst) y@(SigConst)
+    | Just Refl <- eq x y = Just Refl
+  where
+    eq :: forall x y . (Typeable x, Typeable y) => SigRep ('Const x) -> SigRep ('Const y) -> Maybe (x :~: y)
+    eq _ _ = eqT
+testSig (SigPart a1 b1) (SigPart a2 b2)
+    | Just Refl <- testSig a1 a2, Just Refl <- testSig b1 b2 = Just Refl
+testSig (SigPred (_ :: Proxy x) a1) (SigPred (_ :: Proxy y) a2)
+    | Just (Refl :: x :~: y) <- eqT, Just Refl <- testSig a1 a2 = Just Refl
+testSig _ _ = Nothing
+-- todo: Why oh why can't I give 'x' a type 'Const x1'?
+
 -- | Any witness of a symbol signature is a valid symbol signature.
-witSig :: SigRep s -> Dict (Sig s)
+witSig :: SigRep a -> Dict (Sig a)
 witSig (SigConst)    = Dict
 witSig (SigPart a b) | Dict <- witSig a, Dict <- witSig b = Dict
 witSig (SigPred _ a) | Dict <- witSig a = Dict
@@ -129,7 +146,7 @@ type family Minus qs q where
 data QualRep (qs :: Qualifier p) where
     QualNone :: QualRep ('None)
     QualPred :: Proxy p -> QualRep qs -> QualRep (p ':. qs)
-  -- todo: Swap 'Proxy' for 'Dict'?
+-- todo: Swap 'Proxy' for 'Dict'?
 
 -- | Valid symbol qualifiers.
 class Qual (qs :: Qualifier p) where
@@ -150,6 +167,11 @@ instance (q ':. qs) :- q where
 
 instance (qs :- q) => (p ':. qs) :- q where
     entails (QualPred _ qs) = entails qs
+
+--------------------------------------------------------------------------------
+
+minus :: Proxy q -> QualRep qs -> QualRep (Minus qs q)
+minus = undefined
 
 --------------------------------------------------------------------------------
 -- * Abstract syntax tree.
