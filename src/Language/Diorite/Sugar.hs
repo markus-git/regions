@@ -42,15 +42,15 @@ instance Syntactic (Eta sym 'None ('Const a)) where
     desugar = id
 
 --------------------------------------------------------------------------------
-type family PofS (sig :: Signature p *) :: * where PofS (sig :: Signature p *) = p
-type family PofQ (qs :: Qualifier p) :: * where PofQ (qs :: Qualifier p) = p
+type family PofS (sym :: Signature p * -> *) :: * where
+    PofS (sym :: Signature p * -> *) = p
 --------------------------------------------------------------------------------
 
 instance
     ( Syntactic a
     , Syntactic b
-    , Domain a ~ Domain b
-    , Sig (Internal a)
+    , (Domain a :: Signature p * -> *) ~ (Domain b :: Signature p * -> *)
+    , Sig (Internal a :: Signature p *)
     )
     => Syntactic (a -> b)
   where
