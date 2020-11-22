@@ -21,7 +21,8 @@ module Language.Diorite.Syntax
     , QualRep(..)
     , Qual(..)
     , (:-)(..)
-    , minus
+    , union
+    , remove
     -- * Abstract syntax trees.
     , Name
     , Beta(..)
@@ -170,8 +171,28 @@ instance (qs :- q) => (p ':. qs) :- q where
 
 --------------------------------------------------------------------------------
 
-minus :: Proxy q -> QualRep qs -> QualRep (Minus qs q)
-minus = undefined
+-- | Implementation of 'Both'.
+class Union qs ps where
+    union :: QualRep qs -> QualRep ps -> QualRep (Both qs ps)
+
+instance Union 'None ps where
+    union (QualNone) ps = ps
+
+instance {-# OVERLAPS #-} Union qs ps => Union (q ':. qs) ps where
+    union (QualPred q qs) ps = QualPred q (union qs ps)
+
+-- | Implementation of 'Minus'.
+class Remove qs q where
+    remove :: QualRep qs -> Proxy q -> QualRep (Minus qs q)
+
+instance Remove 'None q where
+    remove QualNone Proxy = QualNone
+
+instance {-# OVERLAPS #-} Remove qs q => Remove (q ':. qs) q where
+    remove (QualPred _ qs) q = remove qs q
+
+instance {-# OVERLAPPABLE #-} (Minus (p ':. qs) q ~ (p ':. Minus qs q), Remove qs q) => Remove (p ':. qs) q where
+    remove (QualPred p qs) q = QualPred p (remove qs q)
 
 --------------------------------------------------------------------------------
 -- * Abstract syntax tree.
