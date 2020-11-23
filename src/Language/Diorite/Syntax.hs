@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wall #-}
+{-# OPTIONS_GHC -fprint-explicit-foralls #-}
 
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
@@ -25,12 +26,14 @@ module Language.Diorite.Syntax
     , remove
     -- * Abstract syntax trees.
     , Name
+    , Ev
     , Beta(..)
     , Eta(..)
     , AST
     , ASTF
     , Sym(..)
     , lam
+    , elam
     -- * "Smart" constructors.
     , SmartFun
     , SmartSig
@@ -96,18 +99,16 @@ instance (Typeable p, Sig sig) => Sig (p ':=> sig) where
     signature = SigPred Proxy signature
 
 -- | ...
-testSig :: forall (a :: Signature p *) (b :: Signature p *) . SigRep a -> SigRep b -> Maybe (a :~: b)
-testSig x@(SigConst) y@(SigConst)
-    | Just Refl <- eq x y = Just Refl
+testSig :: SigRep a -> SigRep b -> Maybe (a :~: b)
+testSig x@(SigConst) y@(SigConst) | Just Refl <- eq x y = Just Refl
   where
-    eq :: forall x y . (Typeable x, Typeable y) => SigRep ('Const x) -> SigRep ('Const y) -> Maybe (x :~: y)
-    eq _ _ = eqT
+    eq :: SigRep ('Const a) -> SigRep ('Const b) -> Maybe (a :~: b)
+    eq SigConst SigConst = eqT
 testSig (SigPart a1 b1) (SigPart a2 b2)
     | Just Refl <- testSig a1 a2, Just Refl <- testSig b1 b2 = Just Refl
 testSig (SigPred (_ :: Proxy x) a1) (SigPred (_ :: Proxy y) a2)
     | Just (Refl :: x :~: y) <- eqT, Just Refl <- testSig a1 a2 = Just Refl
 testSig _ _ = Nothing
--- todo: Why oh why can't I give 'x' a type 'Const x1'?
 
 -- | Any witness of a symbol signature is a valid symbol signature.
 witSig :: SigRep a -> Dict (Sig a)
@@ -146,7 +147,7 @@ type family Minus qs q where
 -- | Witness of a symbol qualifier.
 data QualRep (qs :: Qualifier p) where
     QualNone :: QualRep ('None)
-    QualPred :: Proxy p -> QualRep qs -> QualRep (p ':. qs)
+    QualPred :: Proxy q -> QualRep qs -> QualRep (q ':. qs)
 -- todo: Swap 'Proxy' for 'Dict'?
 
 -- | Valid symbol qualifiers.
@@ -156,7 +157,7 @@ class Qual (qs :: Qualifier p) where
 instance Qual ('None) where
     qualifier = QualNone
 
-instance Qual qs => Qual (p ':. qs) where
+instance Qual qs => Qual (q ':. qs) where
     qualifier = QualPred Proxy qualifier
 
 -- | ...
@@ -201,6 +202,9 @@ instance {-# OVERLAPPABLE #-} (Minus (p ':. qs) q ~ (p ':. Minus qs q), Remove q
 -- | Variable names.
 type Name = Int
 
+-- | Evidence names, associated with some predicate 'p'.
+data Ev p = Ev Name
+
 -- | Generic abstact syntax tree with beta-eta long normal form.
 data Beta sym (qs :: Qualifier p) (sig :: Signature p *) where
     -- ^ Variable.
@@ -210,7 +214,7 @@ data Beta sym (qs :: Qualifier p) (sig :: Signature p *) where
     -- ^ Application.
     (:$)  :: Beta sym qs (a ':-> sig) -> Eta sym ps a -> Beta sym (Both qs ps) sig
     -- ^ Evidence-application.
-    (:#)  :: Beta sym qs (p ':=> sig) -> Name -> Beta sym (p ':. qs) sig
+    (:#)  :: Beta sym qs (p ':=> sig) -> Ev p -> Beta sym (p ':. qs) sig
 
 data Eta sym (qs :: Qualifier p) (sig :: Signature p *) where
     -- ^ Body.
@@ -218,7 +222,7 @@ data Eta sym (qs :: Qualifier p) (sig :: Signature p *) where
     -- ^ Abstraction.
     (:\)  :: Sig a => Name -> Eta sym qs sig -> Eta sym qs (a ':-> sig)
     -- ^ Evidence-abstraction.
-    (:\\) :: (Qual qs, qs :- p) => Name -> Eta sym qs sig -> Eta sym (Minus qs p) (p ':=> sig)
+    (:\\) :: (Qual qs, qs :- p) => Ev p -> Eta sym qs sig -> Eta sym (Minus qs p) (p ':=> sig)
 
 infixl 1 :$, :#
 infixr 9 :\, :\\
@@ -234,25 +238,44 @@ class Sym sym where
     symbol :: sym sig -> SigRep sig
 
 --------------------------------------------------------------------------------
--- ** ...
 
--- | Get the highest name bound for 'Eta' node.
-maxLamEta :: Eta sym qs a -> Name
-maxLamEta (n :\ _)  = n
-maxLamEta (_ :\\ e) = maxLamEta e
-maxLamEta (Spine b) = maxLamBeta b
+-- | Get the highest variable name bound for 'Eta' node.
+maxNameEta :: Eta sym qs a -> Name
+maxNameEta (n :\ _)  = n
+maxNameEta (_ :\\ e) = maxNameEta e
+maxNameEta (Spine b) = maxNameBeta b
   where
-    maxLamBeta :: Beta sym qs a -> Name
-    maxLamBeta (beta :$ eta) = maxLamBeta beta `Prelude.max` maxLamEta eta
-    maxLamBeta (beta :# _)   = maxLamBeta beta
-    maxLamBeta _             = 0
+    maxNameBeta :: Beta sym qs a -> Name
+    maxNameBeta (beta :$ eta) = maxNameBeta beta `Prelude.max` maxNameEta eta
+    maxNameBeta (beta :# _)   = maxNameBeta beta
+    maxNameBeta _             = 0
 
 -- | Interface for variable binding.
 lam :: Sig a => (Beta sym qs a -> Eta sym qs b) -> Eta sym qs (a ':-> b)
 lam f = v :\ body
   where
-    v    = maxLamEta body + 1
+    v    = maxNameEta body + 1
     body = f $ Var v
+
+--------------------------------------------------------------------------------
+
+-- | Get the highest evidence name bound for 'Eta' node.
+maxEvEta :: Eta sym qs a -> Name
+maxEvEta (_ :\ e)     = maxEvEta e
+maxEvEta (Ev n :\\ _) = n
+maxEvEta (Spine b)    = maxEvBeta b
+  where
+    maxEvBeta :: Beta sym qs a -> Name
+    maxEvBeta (beta :$ eta) = maxEvBeta beta `Prelude.max` maxEvEta eta
+    maxEvBeta (beta :# _)   = maxEvBeta beta
+    maxEvBeta _             = 0
+
+-- | Interface for evidence binding.
+elam :: (Qual qs, qs :- p) => (Ev p -> Eta sym qs b) -> Eta sym (Minus qs p) (p ':=> b)
+elam f = Ev v :\\ body
+  where
+    v    = maxEvEta body + 1
+    body = f $ Ev v
 
 --------------------------------------------------------------------------------
 -- ** "Smart" constructors.

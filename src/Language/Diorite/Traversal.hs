@@ -12,7 +12,7 @@ module Language.Diorite.Traversal
 
 import Language.Diorite.Syntax
     ( Signature(..), Result, Sig, Qualifier(..), Both
-    , Name, Beta(..), Eta(..), ASTF)
+    , Name, Ev, Beta(..), Eta(..), ASTF)
 
 import qualified Control.Applicative as A
 
@@ -24,15 +24,15 @@ import qualified Control.Applicative as A
 data Args sym (qs :: Qualifier p) (sig :: Signature p *) where
     Nil  :: Args c qs ('Const a)
     (:*) :: Eta sym ps a -> Args sym (Both qs ps) sig -> Args sym qs (a ':-> sig)
-    (:~) :: Name -> Args sym (p ':. qs) sig -> Args sym qs (p ':=> sig)
+    (:~) :: Ev p -> Args sym (p ':. qs) sig -> Args sym qs (p ':=> sig)
 
 infixr :*, :~
 
 -- | "Pattern match" on a fully applied 'AST' using a function that gets direct
 --   access to the top-most symbol and its sub-trees given as 'Args'.
 match :: forall sym qs a c
-    .  (forall ps sig . a ~ Result sig =>
-            sym sig -> Args sym ps sig -> c ('Const a))
+    .  (forall sig . a ~ Result sig =>
+            sym sig -> Args sym 'None sig -> c ('Const a))
        -- ^ Match on a symbol.
     -> (forall ps sig . (a ~ Result sig, Sig sig) =>
             Name -> Args sym ps sig -> c ('Const a))
@@ -51,8 +51,8 @@ match matchSym matchVar = flip matchBeta Nil
 
 -- | A version of 'match' with a simpler, constant result type.
 constMatch :: forall sym qs a b
-    .  (forall ps sig . a ~ Result sig =>
-            sym sig -> Args sym ps sig -> b)
+    .  (forall sig . a ~ Result sig =>
+            sym sig -> Args sym 'None sig -> b)
     -> (forall ps sig . (a ~ Result sig, Sig sig) =>
             Name -> Args sym ps sig -> b)
     -> ASTF sym qs a -> b
@@ -64,13 +64,13 @@ newtype WrapBeta c sym qs sig = WrapBeta { unWrapBeta :: c (Beta sym qs sig) }
 -- | A version of 'match' where the result is a transformed syntax tree, wrapped
 --   in some type constructor.
 transMatch :: forall sym sym' qs c a
-    .  (forall ps sig . a ~ Result sig =>
-            sym sig -> Args sym ps sig -> c (ASTF sym' qs a))
+    .  (forall sig . a ~ Result sig =>
+            sym sig -> Args sym 'None sig -> c (ASTF sym' qs a))
     -> (forall ps sig . (a ~ Result sig, Sig sig) =>
             Name -> Args sym ps sig -> c (ASTF sym' qs a))
     -> ASTF sym qs a -> c (ASTF sym' qs a)
 transMatch f g = unWrapBeta . match (\s -> WrapBeta . f s) (\s -> WrapBeta . g s)
--- todo: This is gonna need some ev. that 'ps < qs'.
+-- todo: 'g' is gonna need some relation between 'ps' and 'qs', like 'ps < qs'.
 
 --------------------------------------------------------------------------------
 -- Fin.

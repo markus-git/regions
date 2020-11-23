@@ -3,6 +3,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 --{-# LANGUAGE FunctionalDependencies #-}
 --{-# LANGUAGE AllowAmbiguousTypes #-}
+--{-# LANGUAGE InstanceSigs #-}
 
 module Language.Diorite.Sugar
     (
@@ -21,31 +22,33 @@ import Language.Diorite.Syntax
 --------------------------------------------------------------------------------
 -- * Syntactic sugaring.
 --------------------------------------------------------------------------------
-
+{-
+type family Pred (qs :: Qualifier p) :: * where
+    Pred (_ :: Qualifier p) = p
+-}
 -- | Syntactic sugaring for 'AST' embeddings.
 class Syntactic a where
-    type Domain a   :: Signature p * -> *
+    type Domain a :: Signature p * -> *
     type Internal a :: Signature p *
-    sugar   :: Beta (Domain a) 'None (Internal a) -> a
-    desugar :: a -> Eta (Domain a) 'None (Internal a)
+    type Constraint a :: Qualifier p
+    sugar :: Beta (Domain a) (Constraint a) (Internal a) -> a
+--    desugar :: a -> Eta (Domain a) (Constraint a) (Internal a)
 
 instance Syntactic (Beta sym 'None ('Const a)) where
-    type Domain (Beta sym 'None ('Const a))   = sym
+    type Domain (Beta sym 'None ('Const a)) = sym
     type Internal (Beta sym 'None ('Const a)) = 'Const a
-    sugar   = id
-    desugar = Spine
+    type Constraint (Beta sym 'None ('Const a)) = 'None
+    sugar = id
+--    desugar = Spine
 
+{-
 instance Syntactic (Eta sym 'None ('Const a)) where
     type Domain (Eta sym 'None ('Const a))   = sym
     type Internal (Eta sym 'None ('Const a)) = 'Const a
     sugar   = Spine
     desugar = id
-
---------------------------------------------------------------------------------
-type family PofS (sym :: Signature p * -> *) :: * where
-    PofS (sym :: Signature p * -> *) = p
---------------------------------------------------------------------------------
-
+-}
+{-
 instance
     ( Syntactic a
     , Syntactic b
@@ -58,6 +61,7 @@ instance
     type Internal (a -> b)  = Internal a ':-> Internal b
     sugar f   = sugar . (f :$) . desugar
     desugar f = lam (desugar . f . sugar)
+-}
 {-
 -- | Syntactic type casting.
 resugar ::
