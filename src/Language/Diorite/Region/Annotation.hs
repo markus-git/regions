@@ -105,11 +105,9 @@ testAnn :: SigRep a -> AnnRep b -> Maybe (a :~~: b)
 testAnn sig ann | Just Refl <- S.testSig sig (erase (strip ann)) = Just (Erased Refl)
 testAnn _ _ = Nothing
 
-{-
+{- note: 'Erasure' being a type family seems to prevent a 'HasDict' instance.
 (|~) :: Maybe (a :~~: b) -> (a ~ Erasure b => Maybe c) -> Maybe c
 (|~) m a = do (Erased Refl) <- m;  a
-  -- note: 'Erasure' being a type family seems to prevent a 'HasDict' instance.
-
 infixr |~
 -}
 
@@ -130,6 +128,10 @@ local Proxy beta = lsym S.:$ S.elam (const (S.Spine beta))
   where
     lsym :: Beta sym 'S.None (('Put r 'S.:=> 'S.Const a) 'S.:-> 'S.Const a)
     lsym = S.inj Local
+
+-- | ...
+at :: Beta sym qs a
+at = undefined
 
 --------------------------------------------------------------------------------
 -- Fin.

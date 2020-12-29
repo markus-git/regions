@@ -26,7 +26,7 @@ module Language.Diorite.Syntax
     , remove
     -- * Abstract syntax trees.
     , Name
-    , Ev
+    , Ev(..)
     , Beta(..)
     , Eta(..)
     , AST
@@ -97,6 +97,8 @@ instance (Sig a, Sig sig) => Sig (a ':-> sig) where
 
 instance (Typeable p, Sig sig) => Sig (p ':=> sig) where
     signature = SigPred Proxy signature
+
+--------------------------------------------------------------------------------
 
 -- | ...
 testSig :: SigRep a -> SigRep b -> Maybe (a :~: b)
@@ -203,7 +205,9 @@ instance {-# OVERLAPPABLE #-} (Minus (p ':. qs) q ~ (p ':. Minus qs q), Remove q
 type Name = Int
 
 -- | Evidence names, associated with some predicate 'p'.
-data Ev p = Ev Name
+newtype Ev p = Ev Name
+
+--------------------------------------------------------------------------------
 
 -- | Generic abstact syntax tree with beta-eta long normal form.
 data Beta sym (qs :: Qualifier p) (sig :: Signature p *) where
@@ -279,27 +283,31 @@ elam f = Ev v :\\ body
 
 --------------------------------------------------------------------------------
 -- ** "Smart" constructors.
+--
+-- notes:
+--   > 'SmartX' overlaps but 'Ev' should be "private".
+--   > 'SmartX' for 'p => f' would be cool, but GHC complains.
 
 -- | Map a symbol to its corresponding "smart" constructor.
 type family SmartFun (sym :: Signature p * -> *) (sig :: Signature p *) where
     SmartFun sym ('Const a) = Beta sym 'None ('Const a)
     SmartFun sym (a ':-> b) = SmartFun sym a -> SmartFun sym b
---  SmartFun sym (p ':=> a) = p => SmartFun sym a
+    SmartFun sym (p ':=> a) = Ev p -> SmartFun sym a
 
 -- | Reconstruct a symbol's signature.
 type family SmartSig f :: Signature p * where
-    SmartSig (AST s q a) = a
+    SmartSig (AST _ _ a) = a
+    SmartSig (Ev p -> f) = p ':=> SmartSig f
     SmartSig (a -> f)    = SmartSig a ':-> SmartSig f
---  SmartSig (p => f)    = SmartSig f
 
 -- | Fetch the symbol of a "smart" constructor.
 type family SmartSym f :: Signature p * -> * where
-    SmartSym (AST s q a) = s
+    SmartSym (AST s _ _) = s
+    SmartSym (Ev p -> f) = SmartSym f
     SmartSym (a -> f)    = SmartSym f
---  SmartSym (p => f)    = SmartSym f
 
 -- | Make a "smart" constructor for a symbol.
-smartSym' :: forall sym sig f
+smartSym' :: forall p sym (sig :: Signature p *) f
     .  ( Sig sig
        , f   ~ SmartFun sym sig
        , sig ~ SmartSig f
@@ -308,15 +316,15 @@ smartSym' :: forall sym sig f
     => sym sig -> f
 smartSym' sym = smartBeta (signature :: SigRep sig) (Sym sym)
   where
-    smartBeta :: forall a . SigRep a -> Beta sym 'None a -> SmartFun sym a
+    smartBeta :: forall q a . SigRep a -> Beta sym 'None a -> SmartFun sym a
     smartBeta (SigConst)    ast = ast
     smartBeta (SigPart a b) ast = \f -> smartBeta b (ast :$ smartEta a f)
-    smartBeta (SigPred _ _) _   = error "todo:smartSym'"
+    smartBeta (SigPred p b) ast = undefined -- \e -> smartBeta b (ast :# undefined p e)
 
-    smartEta :: forall a . SigRep a -> SmartFun sym a -> Eta sym 'None a
+    smartEta :: forall q a . SigRep a -> SmartFun sym a -> Eta sym 'None a
     smartEta (SigConst)    f = Spine f
     smartEta (SigPart a b) f = withDict (witSig a) (lam (smartEta b . f . smartBeta a))
-    smartEta (SigPred _ _) _ = error "todo:smartSym'"
+    smartEta (SigPred p b) f = undefined
 
 --------------------------------------------------------------------------------
 -- * Open symbol domains.
@@ -381,7 +389,7 @@ instance {-# OVERLAPS #-} (sym1 :<: sym3) => (sym1 :<: (sym2 :+: sym3)) where
 --------------------------------------------------------------------------------
 
 -- | Make a "smart" constructor for a symbol.
-smartSym :: forall sup sub sig f
+smartSym :: forall p sup sub (sig :: Signature p *) f
     .  ( Sig sig
        , f   ~ SmartFun sup sig
        , sig ~ SmartSig f

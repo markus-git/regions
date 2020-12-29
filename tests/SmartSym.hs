@@ -1,12 +1,12 @@
 {-# OPTIONS_GHC -Wall #-}
 
-module Sanity where
+module SmartSym where
 
 import Language.Diorite.Syntax
 import Language.Diorite.Interpretation
 
 --------------------------------------------------------------------------------
--- * Sanity test.
+-- * Test that 'smartSym' handles symbol signatures.
 --------------------------------------------------------------------------------
 
 data Put a
@@ -21,28 +21,28 @@ instance Render S where
     renderSym (Y) = "Y"
     renderSym (Z) = "Z"
 
-type B a = Beta S ('None :: Qualifier (Put *)) a
+type B a = Beta S ('None :: Qualifier (Put *)) ('Const a)
 
 --------------------------------------------------------------------------------
 
-x, xs :: B ('Const Int) -> (B ('Const Int) -> B ('Const Int)) -> B ('Const Int)
+x, xs :: B Int -> (B Int -> B Int) -> B Int
 x  = \a -> \f -> Sym X :$ Spine a :$ (lam (\v -> Spine (f v)))
 xs = smartSym' X
 
-y, ys :: ((B ('Const Int) -> B ('Const Int)) -> B ('Const Int)) -> B ('Const Int)
+y, ys :: ((B Int -> B Int) -> B Int) -> B Int
 y  = \f -> Sym Y :$ (lam (\v -> Spine (f (\b -> v :$ (Spine b)))))
 ys = smartSym' Y
 
-z, zs :: (B ('Const Int) -> (B ('Const Int) -> B ('Const Int))) -> B ('Const Int)
+z, zs :: (B Int -> (B Int -> B Int)) -> B Int
 z  = \f -> Sym Z :$ (lam (\b1 -> (lam (\b2 -> Spine (f b1 b2)))))
 zs = smartSym' Z
 
 --------------------------------------------------------------------------------
 
-yt :: B ('Const Int)
+yt :: B Int
 yt = ys (\f -> f var)
   where
-    var :: B ('Const Int)
+    var :: B Int
     var = Var 9
 
 --------------------------------------------------------------------------------
