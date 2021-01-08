@@ -6,7 +6,7 @@ import Language.Diorite.Syntax
 import Language.Diorite.Interpretation
 
 --------------------------------------------------------------------------------
--- * Test that 'smartSym' handles symbol signatures.
+-- * 'smartSym' translates a symbol's signature into the expected function.
 --------------------------------------------------------------------------------
 
 data Put a
