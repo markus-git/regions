@@ -23,9 +23,15 @@ instance Render S where
 
 type B a = Beta S ('None :: Qualifier (Put *)) ('Const a)
 
+type BQ q a = Beta S (q :: Qualifier (Put *)) ('Const a)
+
 --------------------------------------------------------------------------------
 
-x, xs :: B Int -> (B Int -> B Int) -> B Int
+-- 'Const a => forall q . BQ q a
+-- a ':-> b => 
+
+x, xs ::                        BQ 'None Int -> (BQ 'None Int -> BQ 'None Int) -> BQ 'None Int
+x, xs :: forall q1 q2 . Ev p -> BQ q1 Int    -> (BQ q2 Int    -> BQ q2 Int)    -> BQ (p + Union q1 q2) Int
 x  = \a -> \f -> Sym X :$ Spine a :$ (lam (\v -> Spine (f v)))
 xs = smartSym' X
 

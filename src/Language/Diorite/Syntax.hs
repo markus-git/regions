@@ -25,8 +25,8 @@ module Language.Diorite.Syntax
     , QualRep(..)
     , Qual(..)
     , (:-)(..)
---    , union
---    , remove
+--  , union
+--  , remove
     -- * Abstract syntax trees.
     , Name
     , Ev(..)
@@ -307,17 +307,16 @@ elam f = Ev v :\\ body
 --------------------------------------------------------------------------------
 -- ** "Smart" constructors.
 
--- data Qual p = Var p | Then (Qual (L p)) (Qual (R p))
---      
--- xxx :: forall qs. qs ~ ? sig => SigRep sig -> ?Rep qs
--- xxx (SigConst _)  store = QualConst (new store)
--- xxx (SigPart a b) store = QualPart (xxx a store) (xxx b store)
+--  SmartFun' (sym :: Signature p * -> *) (sig :: Signature p *) where
+--  SmartFun' sym ('Const a) = \qs . Beta sym qs ('Const a)
+--  SmartFun' sym (a ':-> b) = \qs . (exists ps . (SmartFun' sym a) ps -> (SmartFun' sym b) (Union ps qs))
+--  SmartFun' sym (q ':=> b) = \qs . Ev q -> (SmartFun sym b) (Insert q qs)
 
 -- | Map a symbol to its corresponding "smart" constructor.
-type family SmartFun (sym :: Signature p * -> *) (sig :: Signature p *) where
-    SmartFun sym ('Const a) = Beta sym 'None ('Const a)
-    SmartFun sym (a ':-> b) = SmartFun sym a -> SmartFun sym b
-    SmartFun sym (q ':=> b) = Ev q -> SmartFun sym b
+type family SmartFun (sym :: Signature p * -> *) (qs :: Qualifier p) (sig :: Signature p *) where
+    SmartFun sym qs ('Const a) = Beta sym qs ('Const a)
+    SmartFun sym qs (a ':-> b) = SmartFun sym ? a -> SmartFun sym (Union qs ?) b
+    SmartFun sym qs (q ':=> b) = Ev q -> SmartFun sym (Insert q qs) b
 
 -- | Reconstruct a symbol's signature.
 type family SmartSig f :: Signature p * where
@@ -341,7 +340,7 @@ type family SmartSym f :: Signature p * -> * where
 
 -- | Make a "smart" constructor for a symbol.
 smartSym' :: forall sym (sig :: Signature p *) f
-    .  ( Sig  sig
+    .  ( Sig sig
        , f   ~ SmartFun sym sig
        , sig ~ SmartSig  f
        , sym ~ SmartSym  f
