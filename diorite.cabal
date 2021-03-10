@@ -19,6 +19,7 @@ library
   exposed-modules:
 --    Language.Diorite
     Language.Diorite.Syntax
+    Language.Diorite.Signatures
 --    Language.Diorite.Sugar
 --    Language.Diorite.Interpretation
 --    Language.Diorite.Decoration

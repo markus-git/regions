@@ -8,27 +8,8 @@
 
 module Language.Diorite.Syntax
     (
-    -- * Signatures.
-      Signature(..)
-    , Result
-    , SigRep(..)
-    , Sig(..)
-    , testSig
-    , witSig
-    , witTypeable
-    -- * Qualifiers.
-    , Qualifier(..)
-    , Insert
-    , Union
-    , Remove
-    , Element
-    , QualRep(..)
-    , Qual(..)
-    , (:-)(..)
---  , union
---  , remove
     -- * Abstract syntax trees.
-    , Name
+      Name
     , Ev(..)
     , Beta(..)
     , Eta(..)
@@ -41,7 +22,7 @@ module Language.Diorite.Syntax
     , SmartFun
     , SmartSig
     , SmartSym
-    , smartSym'
+--  , smartSym'
     -- * Open symbol domains.
     , Empty
     , (:+:)(..)
@@ -56,170 +37,13 @@ module Language.Diorite.Syntax
 -- Related stuff:
 --   https://emilaxelsson.github.io/documents/axelsson2012generic.pdf
 
+import Language.Diorite.Signatures
+
 import Data.Constraint (Dict(..), withDict)
 import Data.Proxy (Proxy(..))
 import Data.Type.Equality ((:~:)(..))
 import Data.Typeable (Typeable, eqT)
 
---------------------------------------------------------------------------------
--- * Signatures.
---------------------------------------------------------------------------------
-
--- | Signature of a symbol.
-data Signature p a =
-      Const a
-    | Signature p a :-> Signature p a
-    | p :=> Signature p a
-
-infixr 2 :->, :=>
-
--- | Denotational result of a symbol's signature.
-type family Result (sig :: Signature p *) where
-    Result ('Const a) = a
-    Result (a ':-> b) = Result b
-    Result (p ':=> a) = Result a
-
---------------------------------------------------------------------------------
--- ** Rep. of a valid signature.
-
--- | Witness of a symbol signature.
-data SigRep (sig :: Signature p *) where
-    SigConst :: Typeable a => SigRep ('Const a)
-    SigPart  :: SigRep a -> SigRep sig -> SigRep (a ':-> sig)
-    SigPred  :: Typeable p => Proxy p -> SigRep sig -> SigRep (p ':=> sig)
-
--- | Valid symbol signatures.
-class Sig (sig :: Signature p *) where
-    signature :: SigRep sig
-
-instance Typeable a => Sig ('Const a) where
-    signature = SigConst
-
-instance (Sig a, Sig sig) => Sig (a ':-> sig) where
-    signature = SigPart signature signature
-
-instance (Typeable p, Sig sig) => Sig (p ':=> sig) where
-    signature = SigPred Proxy signature
-
---------------------------------------------------------------------------------
-
--- | Extract a witness of equality of two constant types.
-testConst :: SigRep ('Const a) -> SigRep ('Const b) -> Maybe (a :~: b)
-testConst SigConst SigConst = eqT
-
--- | Extract a witness of equality of two types.
-testSig :: SigRep a -> SigRep b -> Maybe (a :~: b)
-testSig a1@(SigConst) a2@(SigConst)
-    | Just Refl <- testConst a1 a2
-    = Just Refl
-testSig (SigPart a1 b1) (SigPart a2 b2)
-    | Just Refl <- testSig a1 a2
-    , Just Refl <- testSig b1 b2
-    = Just Refl
-testSig (SigPred (_ :: Proxy x) a1) (SigPred (_ :: Proxy y) a2)
-    | Just Refl <- eqT :: Maybe (x :~: y)
-    , Just Refl <- testSig a1 a2
-    = Just Refl
-testSig _ _ = Nothing
-
--- | Any witness of a symbol signature is a valid symbol signature.
-witSig :: SigRep a -> Dict (Sig a)
-witSig (SigConst)    = Dict
-witSig (SigPart a b) | Dict <- witSig a, Dict <- witSig b = Dict
-witSig (SigPred _ a) | Dict <- witSig a = Dict
-
--- | Any witness of a constant symbol signature is typeable.
-witTypeable :: SigRep ('Const a) -> Dict (Typeable a)
-witTypeable (SigConst) = Dict
-
---------------------------------------------------------------------------------
--- * Qualifiers.
---------------------------------------------------------------------------------
-
--- | Collection of predicates.
-data Qualifier p =
-      None
-    | p :. Qualifier p
-
-infixr 2 :.
-
--- | ...
-type family Insert q qs where
-    Insert q ('None)    = q ':. 'None
-    Insert q (q ':. qs) = q ':. qs
-    Insert q (a ':. qs) = a ':. Insert q qs
-  
--- | Join the predicates from two sets of qualifiers.
-type family Union qs ps where
-    Union ('None)    ps = ps
-    Union (q ':. qs) ps = q ':. Union qs ps
---  Union (q ':. qs) ps = Insert q (Union qs ps)
-
--- | Delete a predicate from a set of qualifiers.
-type family Remove q qs where
-    Remove _ ('None)    = 'None
-    Remove q (q ':. qs) = qs
-    Remove q (a ':. qs) = a ':. Remove q qs
-
--- | ...
-type family Element q qs where
-    Element _ ('None)    = 'False
-    Element q (q ':. qs) = 'True
-    Element q (_ ':. qs) = Element q qs
-
---------------------------------------------------------------------------------
--- ** Rep. of a valid qualifier.
-
--- | Witness of a symbol qualifier.
-data QualRep (qs :: Qualifier p) where
-    QualNone  :: QualRep ('None)
-    QualPred  :: Proxy q -> QualRep qs -> QualRep (q ':. qs)
-
--- | Valid symbol qualifiers.
-class Qual (qs :: Qualifier p) where
-    qualifier :: QualRep qs
-
-instance Qual ('None) where
-    qualifier = QualNone
-
-instance Qual qs => Qual (q ':. qs) where
-    qualifier = QualPred Proxy qualifier
-
--- | ...
-class qs :- q where
-    entails :: QualRep qs -> Proxy q
-
-instance (q ':. qs) :- q where
-    entails (QualPred p _) = p
-
-instance (qs :- q) => (p ':. qs) :- q where
-    entails (QualPred _ qs) = entails qs
-
---------------------------------------------------------------------------------
-{-
--- | Implementation of 'Both'.
-class Union qs ps where
-    union :: QualRep qs -> QualRep ps -> QualRep (Both qs ps)
-
-instance Union 'None ps where
-    union (QualNone) ps = ps
-
-instance {-# OVERLAPS #-} Union qs ps => Union (q ':. qs) ps where
-    union (QualPred q qs) ps = QualPred q (union qs ps)
-
--- | Implementation of 'Minus'.
-class Remove qs q where
-    remove :: QualRep qs -> Proxy q -> QualRep (Minus qs q)
-
-instance Remove 'None q where
-    remove QualNone Proxy = QualNone
-
-instance {-# OVERLAPS #-} Remove qs q => Remove (q ':. qs) q where
-    remove (QualPred _ qs) q = remove qs q
-
-instance {-# OVERLAPPABLE #-} (Minus (p ':. qs) q ~ (p ':. Minus qs q), Remove qs q) => Remove (p ':. qs) q where
-    remove (QualPred p qs) q = QualPred p (remove qs q)
--}
 --------------------------------------------------------------------------------
 -- * Abstract syntax tree.
 --------------------------------------------------------------------------------
@@ -229,8 +53,6 @@ type Name = Int
 
 -- | Evidence names, associated with some 'q'.
 newtype Ev q = Ev Name
-
---------------------------------------------------------------------------------
 
 -- | Generic abstract syntax tree with beta-eta long normal form.
 data Beta sym (qs :: Qualifier p) (sig :: Signature p *) where
@@ -278,11 +100,13 @@ maxNameEta (Spine b) = maxNameBeta b
     maxNameBeta _             = 0
 
 -- | Interface for variable binding.
-lam :: Sig a => (Beta sym qs a -> Eta sym qs b) -> Eta sym qs (a ':-> b)
+lam :: Sig a => (Beta sym None a -> Eta sym qs b) -> Eta sym qs (a ':-> b)
 lam f = v :\ body
   where
     v    = maxNameEta body + 1
     body = f $ Var v
+-- todo: Not sure about the 'None' here. It might be too restrictive, but I'm
+--       also not sure what to put otherwise..
 
 --------------------------------------------------------------------------------
 
@@ -307,16 +131,32 @@ elam f = Ev v :\\ body
 --------------------------------------------------------------------------------
 -- ** "Smart" constructors.
 
+--  # Original idea.
 --  SmartFun' (sym :: Signature p * -> *) (sig :: Signature p *) where
 --  SmartFun' sym ('Const a) = \qs . Beta sym qs ('Const a)
 --  SmartFun' sym (a ':-> b) = \qs . (exists ps . (SmartFun' sym a) ps -> (SmartFun' sym b) (Union ps qs))
 --  SmartFun' sym (q ':=> b) = \qs . Ev q -> (SmartFun sym b) (Insert q qs)
-
+--
+--  # Functions merged with 'SmartFun'.
+--  SmartFun (sym :: Signature p * -> *) (qs :: Qualifier p) (sig :: Signature p *) where
+--  SmartFun sym qs ('Const a) = Beta sym qs ('Const a)
+--  SmartFun sym qs (a ':-> b) = (exists ps . SmartFun sym ps a -> SmartFun sym (Union qs ps) b)
+--  SmartFun sym qs (q ':=> b) = Ev q -> SmartFun sym (Insert q qs) b
+--
 -- | Map a symbol to its corresponding "smart" constructor.
-type family SmartFun (sym :: Signature p * -> *) (qs :: Qualifier p) (sig :: Signature p *) where
-    SmartFun sym qs ('Const a) = Beta sym qs ('Const a)
-    SmartFun sym qs (a ':-> b) = SmartFun sym ? a -> SmartFun sym (Union qs ?) b
-    SmartFun sym qs (q ':=> b) = Ev q -> SmartFun sym (Insert q qs) b
+type family SmartFun (sym :: Signature p * -> *)
+                     (qs :: Qualifier p)
+                     (ex :: Ext p)
+                     (sig :: Signature p *)
+  where
+    SmartFun sym qs ('X) ('Const a) =
+        Beta sym qs ('Const a)
+    SmartFun sym qs ('Y ps rs) (a ':-> b) =
+        SmartFun sym 'None ps a -> SmartFun sym (Union qs (Flat ps)) rs b
+    SmartFun sym qs ('Z q rs) (q ':=> b) =
+        Ev q -> SmartFun sym (Insert q qs) rs b
+
+--------------------------------------------------------------------------------
 
 -- | Reconstruct a symbol's signature.
 type family SmartSig f :: Signature p * where
@@ -324,11 +164,11 @@ type family SmartSig f :: Signature p * where
     SmartSig (Ev q -> f) = q ':=> SmartSig f
     SmartSig (a -> f)    = SmartSig a ':-> SmartSig f
 
--- | ...
+-- | Feth the qualifiers of a "smart" constructor.
 type family SmartQual f :: Qualifier p where
     SmartQual (AST _ q _) = q
-    SmartQual (Ev q -> f) = SmartQual f
-    SmartQual (a -> f)    = SmartQual f
+    SmartQual (Ev _ -> f) = SmartQual f
+    SmartQual (_ -> f)    = SmartQual f
 
 -- | Fetch the symbol of a "smart" constructor.
 type family SmartSym f :: Signature p * -> * where
@@ -338,25 +178,115 @@ type family SmartSym f :: Signature p * -> * where
 
 --------------------------------------------------------------------------------
 
+-- # Original idea.
+-- smartSym' :: forall sym (sig :: Signature p *) f
+--    .  ( Sig sig
+--        , f   ~ SmartFun sym sig
+--        , sig ~ SmartSig  f
+--        , sym ~ SmartSym  f
+--        )
+--     => sym sig -> f
+-- smartSym' sym = smartBeta (signature :: SigRep sig) (Sym sym)
+--   where
+--     smartBeta :: forall a . SigRep a -> Beta sym 'None a -> SmartFun sym a
+--     smartBeta (SigConst)    ast = ast
+--     smartBeta (SigPart a b) ast = \f -> smartBeta b (ast :$ smartEta a f)
+
+--     smartEta :: forall a . SigRep a -> SmartFun sym a -> Eta sym 'None a
+--     smartEta (SigConst)    f = Spine f
+--     smartEta (SigPart a b) f = withDict (witSig a)
+--         (lam (smartEta b . f . smartBeta a))
+--
+-- # ...
+
 -- | Make a "smart" constructor for a symbol.
-smartSym' :: forall sym (sig :: Signature p *) f
+smartSym' :: forall (ex :: Ext p) sym (sig :: Signature p *) f
     .  ( Sig sig
-       , f   ~ SmartFun sym sig
+       , f   ~ SmartFun sym 'None ex sig
        , sig ~ SmartSig  f
        , sym ~ SmartSym  f
        )
-    => sym sig -> f
-smartSym' sym = smartBeta (signature :: SigRep sig) (Sym sym)
+    => ExtRep ex -> sym sig -> f
+smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
   where
-    smartBeta :: forall a . SigRep a -> Beta sym 'None a -> SmartFun sym a
-    smartBeta (SigConst)    ast = ast
-    smartBeta (SigPart a b) ast = \f -> smartBeta b (ast :$ smartEta a f)
---  smartBeta (SigPred p b) ast = \e -> smartBeta b (ast :# e)
-
-    smartEta :: forall a . SigRep a -> SmartFun sym a -> Eta sym 'None a
-    smartEta (SigConst)    f = Spine f
-    smartEta (SigPart a b) f = withDict (witSig a) (lam (smartEta b . f . smartBeta a))
---  smartEta (SigPred p b) f = undefined
+    smartBeta :: forall e q a .
+           ExtRep e
+        -> SigRep a
+        -> Beta sym q a
+        -> SmartFun sym q e a
+    smartBeta (ExtX) (SigConst) ast = ast
+    -- Beta q? a? -> SF q? e? a?
+    --   > a? ~ (Const a?), e? ~ X
+    -- Beta q? (Const a?) -> SF q? X (Const a?)
+    --   > expand SF
+    -- Beta q? (Const a?) -> Beta q? (Const a?)
+    --  ^^^^^^^^^^^^^^^^
+    --        ast
+    -- =>
+    -- 1 : ast :: Beta q? (Const a?)
+    --
+    smartBeta (ExtY x y) (SigPart a b) ast = \f ->
+        smartBeta y b (ast :$ smartEta x QualNone a f)
+    -- Beta q? a? -> SF q? e? a?
+    --   > a? ~ (a? -> b?), e? ~ (Y x? y?)
+    -- Beta q? (a? -> b?) -> SF q? (Y x? y?) (a? -> b?)
+    --   > expand SF
+    -- Beta q? (a? -> b?) -> (SF None x? a? -> SF (q? + x?) y? b?)
+    --  ^^^^^^^^^^^^^^^^       ^^^^^^^^^^^
+    --        ast                   f
+    -- =>
+    -- 1 : (ast :$)        :: Eta t1? a? -> Beta (q? + t1?) b?
+    -- 2 : smartEta f      :: Eta (None + x?) a? ~ Eta x? a?
+    -- 3 : smartBeta (1 2) :: SF (q? + x?) t2? b?
+    --
+    smartEta :: forall e q a .
+           ExtRep e
+        -> QualRep q
+        -> SigRep a
+        -> SmartFun sym q e a
+        -> Eta sym (Union q (Flat e)) a
+    smartEta (ExtX) q (SigConst) f =
+        withDict (witUnionNone q) $
+        Spine f
+    -- SF q? e? a? -> Eta (q? + e?) a?
+    --   > a ~ (Const a?), e? ~ X
+    -- SF q? X (Const a?) -> Eta (q? + X) (Const a?)
+    --   > q? + X ~ q?, expand SF
+    -- Beta q? (Const a?) -> Eta q? (Const a?)
+    --  ^^^^^^^^^^^^^^^^
+    --         f
+    -- =>
+    -- 1 : Spine f :: Eta q? (Const a?)
+    --
+    smartEta (ExtY x y) q (SigPart a b) f =
+        withDict (witSig a) $
+        --withDict (witUnionAssoc _ _ _) $
+        lam (undefined . f . smartBeta x a)
+        --lam (\v -> smartEta y QualNone b $ f $ smartBeta x a v)
+    -- SF q? e? a? -> Eta (q? + e?) a?
+    --   > a? ~ (a? -> b?), e? ~ (Y x? y?)
+    -- SF q? (Y x? y?) (a? -> b?) -> Eta (q? + (Y x? y?)) (a? -> b?)
+    --   > q? + (Y x? y?) ~ q? + x? + y?, expand SF
+    -- (SF None x? a? -> SF (q? + x?) y? b?) -> Eta (q? + x? + y?) (a? -> b?)
+    --  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    --                  f
+    -- =>
+    -- subgoal : lam (\sf -> _1 $ f $ _2 sf)
+    -- where lam :: (Beta sym None a? -> Eta sym (q? + x? + y?) b?) -> Eta sym (q? + x? + y?) (a? -> b?)
+    --       _1  :: SF (q? + x?) y? b? -> Eta (q? + x? + y?) b?
+    --       _2  :: Beta None a? -> SF None x? a?
+    -- =>
+    -- 1 : sf          :: Beta None a?
+    -- 2 : smartBeta 1 :: SF None x? a?
+    -- 3 : f 2         :: SF (q? + x?) y? b?
+    -- 4 : smartEta 3  :: Eta (q? + x? + y?) b?
+    --
+    -- ! not shown: assoc of + and flattening of x? & y? !
+    -- 3    :: SF (U q? (F x?)) y? _
+    -- 4    :: Eta (U (U q? (F x?)) (F y?))
+    -- goal :: Eta (U q? (U (F x?) (F y?))) _
+    -- =>
+    -- show : (U (U a b) c) ~ (U a (U b c)
 
 --------------------------------------------------------------------------------
 -- * Open symbol domains.
