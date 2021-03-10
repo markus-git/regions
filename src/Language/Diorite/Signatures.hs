@@ -18,13 +18,14 @@ module Language.Diorite.Signatures
     , Insert
     , Union
     , Remove
-    , Element
     , QualRep(..)
     , Qual(..)
     , (:-)(..)
 --  , union
 --  , remove
     , witUnionNone
+    , witUnionRefl
+    , witUnionAssoc
     -- * ???
     , Ext(..)
     , Flat
@@ -136,12 +137,6 @@ type family Remove q qs where
     Remove q (q ':. qs) = qs
     Remove q (a ':. qs) = a ':. Remove q qs
 
--- | ...
-type family Element q qs where
-    Element _ ('None)    = 'False
-    Element q (q ':. qs) = 'True
-    Element q (_ ':. qs) = Element q qs
-
 --------------------------------------------------------------------------------
 -- ** Rep. of a valid qualifier.
 
@@ -171,6 +166,46 @@ instance (qs :- q) => (p ':. qs) :- q where
     entails (QualPred _ qs) = entails qs
 
 --------------------------------------------------------------------------------
+-- *** Implementation of ...
+
+-- | Implementation of 'Insert'.
+class InsertC q qs where
+    insert :: Proxy q -> QualRep qs -> QualRep (Insert q qs)
+
+instance InsertC q 'None where
+    insert q (QualNone) = QualPred q QualNone
+
+instance {-# OVERLAPS #-} InsertC q (q ':. qs) where
+    insert _ (QualPred q qs) = QualPred q qs
+
+instance {-# OVERLAPPABLE #-} (Insert q (p ':. qs) ~ (p ':. Insert q qs), InsertC q qs) => InsertC q (p ':. qs) where
+    insert q (QualPred p qs) = QualPred p (insert q qs)
+
+-- | Implementation of 'Union'.
+class UnionC qs ps where
+    union :: QualRep qs -> QualRep ps -> QualRep (Union qs ps)
+
+instance UnionC 'None ps where
+    union (QualNone) ps = ps
+
+instance (InsertC q (Union qs ps), UnionC qs ps) => UnionC (q ':. qs) ps where
+    union (QualPred q qs) ps = insert q (union qs ps)
+
+-- | Implementation of 'Remove'.
+class RemoveC q qs where
+    remove :: Proxy q -> QualRep qs -> QualRep (Remove q qs)
+
+instance RemoveC 'None q where
+    remove Proxy QualNone = QualNone
+
+instance {-# OVERLAPS #-} (Remove q qs ~ qs, RemoveC q qs) => RemoveC q (q ':. qs) where
+    remove q (QualPred _ qs) = remove q qs
+
+instance {-# OVERLAPPABLE #-} (Remove q (p ':. qs) ~ (p ':. Remove q qs), RemoveC q qs) => RemoveC q (p ':. qs) where
+    remove q (QualPred p qs) = QualPred p (remove q qs)
+
+--------------------------------------------------------------------------------
+-- *** Witness of ...
 
 witUnionNone :: QualRep a -> Dict (Union a 'None ~ a)
 witUnionNone (QualNone) = Dict
@@ -184,40 +219,12 @@ witUnionRefl (QualPred a as) b
     | Dict <- witUnionRefl as b
     = undefined
 
-witUnionAssoc ::
-     QualRep a
-  -> QualRep b
-  -> QualRep c
+witUnionAssoc :: QualRep a -> QualRep b -> QualRep c
   -> Dict (Union a (Union b c) ~ Union (Union a b) c)
 witUnionAssoc (QualNone) b c = Dict
 witUnionAssoc (QualPred a as) b c
     | Dict <- witUnionAssoc as b c
     = undefined
-
-{-
--- | Implementation of 'Both'.
-class Union qs ps where
-    union :: QualRep qs -> QualRep ps -> QualRep (Both qs ps)
-
-instance Union 'None ps where
-    union (QualNone) ps = ps
-
-instance {-# OVERLAPS #-} Union qs ps => Union (q ':. qs) ps where
-    union (QualPred q qs) ps = QualPred q (union qs ps)
-
--- | Implementation of 'Minus'.
-class Remove qs q where
-    remove :: QualRep qs -> Proxy q -> QualRep (Minus qs q)
-
-instance Remove 'None q where
-    remove QualNone Proxy = QualNone
-
-instance {-# OVERLAPS #-} Remove qs q => Remove (q ':. qs) q where
-    remove (QualPred _ qs) q = remove qs q
-
-instance {-# OVERLAPPABLE #-} (Minus (p ':. qs) q ~ (p ':. Minus qs q), Remove qs q) => Remove (p ':. qs) q where
-    remove (QualPred p qs) q = QualPred p (remove qs q)
--}
 
 --------------------------------------------------------------------------------
 -- *
@@ -237,8 +244,8 @@ data ExtRep (ex :: Ext p) where
 
 flatten :: ExtRep p -> QualRep (Flat p)
 flatten (ExtX)       = QualNone
---flatten (ExtY ps rs) = union (flatten ps) (flatten rs)
---flatten (ExtZ p  rs) = insert p (flatten rs)
+flatten (ExtY ps rs) = undefined --union (flatten ps) (flatten rs)
+flatten (ExtZ p  rs) = undefined --insert p (flatten rs)
 
 --------------------------------------------------------------------------------
 -- Fin.
