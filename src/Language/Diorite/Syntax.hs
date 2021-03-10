@@ -100,13 +100,11 @@ maxNameEta (Spine b) = maxNameBeta b
     maxNameBeta _             = 0
 
 -- | Interface for variable binding.
-lam :: Sig a => (Beta sym None a -> Eta sym qs b) -> Eta sym qs (a ':-> b)
+lam :: Sig a => (Beta sym ps a -> Eta sym qs b) -> Eta sym qs (a ':-> b)
 lam f = v :\ body
   where
     v    = maxNameEta body + 1
     body = f $ Var v
--- todo: Not sure about the 'None' here. It might be too restrictive, but I'm
---       also not sure what to put otherwise..
 
 --------------------------------------------------------------------------------
 
@@ -143,18 +141,17 @@ elam f = Ev v :\\ body
 --  SmartFun sym qs (a ':-> b) = (exists ps . SmartFun sym ps a -> SmartFun sym (Union qs ps) b)
 --  SmartFun sym qs (q ':=> b) = Ev q -> SmartFun sym (Insert q qs) b
 --
+-- # Swap 'exists' for 'forall' arg?
+
 -- | Map a symbol to its corresponding "smart" constructor.
 type family SmartFun (sym :: Signature p * -> *)
                      (qs :: Qualifier p)
                      (ex :: Ext p)
                      (sig :: Signature p *)
   where
-    SmartFun sym qs ('X) ('Const a) =
-        Beta sym qs ('Const a)
-    SmartFun sym qs ('Y ps rs) (a ':-> b) =
-        SmartFun sym 'None ps a -> SmartFun sym (Union qs (Flat ps)) rs b
-    SmartFun sym qs ('Z q rs) (q ':=> b) =
-        Ev q -> SmartFun sym (Insert q qs) rs b
+    SmartFun sym qs ('X)       ('Const a) = Beta sym qs ('Const a)
+    SmartFun sym qs ('Y ps rs) (a ':-> b) = SmartFun sym 'None ps a -> SmartFun sym (Union qs (Flat ps)) rs b
+    SmartFun sym qs ('Z q rs)  (q ':=> b) = Ev q -> SmartFun sym (Insert q qs) rs b
 
 --------------------------------------------------------------------------------
 
@@ -260,9 +257,10 @@ smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
     --
     smartEta (ExtY x y) q (SigPart a b) f =
         withDict (witSig a) $
-        --withDict (witUnionAssoc _ _ _) $
-        lam (undefined . f . smartBeta x a)
-        --lam (\v -> smartEta y QualNone b $ f $ smartBeta x a v)
+        withDict (witUnionAssoc q (flatten x) (flatten y)) $
+        lam (smartF x y a b f)
+        -- lam (\v -> smartEta y (smartQ q (flatten x)) b $ f $ smartBeta x a v)
+        -- lam (smartEta y QualNone b . f . smartBeta x a)
     -- SF q? e? a? -> Eta (q? + e?) a?
     --   > a? ~ (a? -> b?), e? ~ (Y x? y?)
     -- SF q? (Y x? y?) (a? -> b?) -> Eta (q? + (Y x? y?)) (a? -> b?)
@@ -270,16 +268,23 @@ smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
     -- (SF None x? a? -> SF (q? + x?) y? b?) -> Eta (q? + x? + y?) (a? -> b?)
     --  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     --                  f
+    -- eta constructed with 'lam' => new subgoal: sugar f
+      where
+        smartF :: forall x y a b .
+               ExtRep x -> ExtRep y
+            -> SigRep a -> SigRep b
+            -> (SmartFun sym 'None x a -> SmartFun sym (Union q (Flat x)) y b)
+            -> Beta sym 'None a
+            -> Eta sym (Union (Union q (Flat x)) (Flat y)) b
+        smartF x y a b f ast = smartEta y (smartQ x) b $ f $ smartBeta x a ast
+    -- Beta 'None a? -> Eta (q? + x? + y?) b?
     -- =>
-    -- subgoal : lam (\sf -> _1 $ f $ _2 sf)
-    -- where lam :: (Beta sym None a? -> Eta sym (q? + x? + y?) b?) -> Eta sym (q? + x? + y?) (a? -> b?)
-    --       _1  :: SF (q? + x?) y? b? -> Eta (q? + x? + y?) b?
-    --       _2  :: Beta None a? -> SF None x? a?
-    -- =>
-    -- 1 : sf          :: Beta None a?
-    -- 2 : smartBeta 1 :: SF None x? a?
-    -- 3 : f 2         :: SF (q? + x?) y? b?
-    -- 4 : smartEta 3  :: Eta (q? + x? + y?) b?
+    -- 1 : smartBeta ast :: SF None x? a?
+    -- 2 : f 2           :: SF (q? + x?) y? b?
+    -- 3 : smartEta 3    :: Eta (q? + x? + y?) b?
+    --
+        smartQ :: forall x . ExtRep x -> QualRep (Union q (Flat x))
+        smartQ = undefined
     --
     -- ! not shown: assoc of + and flattening of x? & y? !
     -- 3    :: SF (U q? (F x?)) y? _
