@@ -151,7 +151,7 @@ type family SmartFun (sym :: Signature p * -> *)
   where
     SmartFun sym qs ('X)       ('Const a) = Beta sym qs ('Const a)
     SmartFun sym qs ('Y ps rs) (a ':-> b) = SmartFun sym 'None ps a -> SmartFun sym (Union qs (Flat ps)) rs b
-    SmartFun sym qs ('Z q rs)  (q ':=> b) = Ev q -> SmartFun sym (Insert q qs) rs b
+    SmartFun sym qs ('Z q rs)  (q ':=> b) = Ev q -> SmartFun sym (q ':. qs) rs b
 
 --------------------------------------------------------------------------------
 
@@ -212,30 +212,45 @@ smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
         -> Beta sym q a
         -> SmartFun sym q e a
     smartBeta (ExtX) (SigConst) ast = ast
-    -- Beta q? a? -> SF q? e? a?
-    --   > a? ~ (Const a?), e? ~ X
-    -- Beta q? (Const a?) -> SF q? X (Const a?)
-    --   > expand SF
-    -- Beta q? (Const a?) -> Beta q? (Const a?)
+    -- Beta q a -> SF q e a?
+    --   > a ~ (Const a?), e ~ X
+    -- Beta q (Const a?) -> SF q X (Const a?)
+    --   > expand SF def.
+    -- Beta q (Const a?) -> Beta q (Const a?)
     --  ^^^^^^^^^^^^^^^^
     --        ast
     -- =>
-    -- 1 : ast :: Beta q? (Const a?)
+    -- 1 : ast :: Beta q (Const a?)
     --
-    smartBeta (ExtY x y) (SigPart a b) ast = \f ->
-        smartBeta y b (ast :$ smartEta x QualNone a f)
-    -- Beta q? a? -> SF q? e? a?
-    --   > a? ~ (a? -> b?), e? ~ (Y x? y?)
-    -- Beta q? (a? -> b?) -> SF q? (Y x? y?) (a? -> b?)
-    --   > expand SF
-    -- Beta q? (a? -> b?) -> (SF None x? a? -> SF (q? + x?) y? b?)
-    --  ^^^^^^^^^^^^^^^^       ^^^^^^^^^^^
-    --        ast                   f
+    smartBeta (ExtY x y) (SigPart a b) ast =
+        \f -> smartBeta y b (ast :$ smartEta x QualNone a f)
+    -- Beta q a -> SF q e a
+    --   > a ~ (a? -> b?), e ~ (Y x? y?) ~ x? + y?
+    -- Beta q (a? -> b?) -> SF q (x? + y?) (a? -> b?)
+    --   > expand SF def.
+    -- Beta q (a? -> b?) -> SF 'None x? a? -> SF (q + x?) y? b?
+    --  ^^^^^^^^^^^^^^^^     ^^^^^^^^^^^^
+    --        ast                  f
     -- =>
-    -- 1 : (ast :$)        :: Eta t1? a? -> Beta (q? + t1?) b?
-    -- 2 : smartEta f      :: Eta (None + x?) a? ~ Eta x? a?
-    -- 3 : smartBeta (1 2) :: SF (q? + x?) t2? b?
+    -- 1 : smartEta f  :: Eta ('None + x?) a? ~ Eta x? a?
+    -- 2 : ast :$ 1    :: Beta (q + x?) b?
+    -- 3 : smartBeta 2 :: SF (q + x?) y? b?
     --
+    smartBeta (ExtZ p y) (SigPred p' b) ast | Just Refl <- eqP p p' =
+        \e -> smartBeta y b (ast :# e)
+    -- Beta q a? -> SF q e a
+    --   > a ~ (p? => b?), e ~ (Z p? y?)
+    -- Beta q (p? => b?) -> SF q (Z p? y?) (p? => b?)
+    --   > expand SF def.
+    -- Beta q (p? => b?) -> Ev p? -> SF (p? : q) y? b?
+    --  ^^^^^^^^^^^^^^^      ^^^
+    --        ast             e
+    -- =>
+    -- 1 : ast :# e    :: Beta (p? : q) b?
+    -- 2 : smartBeta 1 :: SF (p? : q) y? b?
+    --
+    smartBeta _ _ _ = error "What?!"
+
     smartEta :: forall e q a .
            ExtRep e
         -> QualRep q
@@ -245,53 +260,58 @@ smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
     smartEta (ExtX) q (SigConst) f =
         withDict (witUnionNone q) $
         Spine f
-    -- SF q? e? a? -> Eta (q? + e?) a?
-    --   > a ~ (Const a?), e? ~ X
-    -- SF q? X (Const a?) -> Eta (q? + X) (Const a?)
-    --   > q? + X ~ q?, expand SF
-    -- Beta q? (Const a?) -> Eta q? (Const a?)
+    -- SF q e a -> Eta (q + e) a
+    --   > a ~ (Const a?), e ~ X
+    -- SF q X (Const a?) -> Eta (q + X) (Const a?)
+    --   > q + X ~ q, expand SF def.
+    -- Beta q (Const a?) -> Eta q (Const a?)
     --  ^^^^^^^^^^^^^^^^
     --         f
     -- =>
-    -- 1 : Spine f :: Eta q? (Const a?)
+    -- 1 : Spine f :: Eta q (Const a?)
     --
     smartEta (ExtY x y) q (SigPart a b) f =
         withDict (witSig a) $
         withDict (witUnionAssoc q (flatten x) (flatten y)) $
-        lam (smartF x y a b f)
-        -- lam (\v -> smartEta y (smartQ q (flatten x)) b $ f $ smartBeta x a v)
-        -- lam (smartEta y QualNone b . f . smartBeta x a)
-    -- SF q? e? a? -> Eta (q? + e?) a?
-    --   > a? ~ (a? -> b?), e? ~ (Y x? y?)
-    -- SF q? (Y x? y?) (a? -> b?) -> Eta (q? + (Y x? y?)) (a? -> b?)
-    --   > q? + (Y x? y?) ~ q? + x? + y?, expand SF
-    -- (SF None x? a? -> SF (q? + x?) y? b?) -> Eta (q? + x? + y?) (a? -> b?)
-    --  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    --                  f
-    -- eta constructed with 'lam' => new subgoal: sugar f
+        lam (\(v :: Beta sym 'None x) -> smartEta y (smartQ x) b $ f $ smartBeta x a v)
       where
-        smartF :: forall x y a b .
-               ExtRep x -> ExtRep y
-            -> SigRep a -> SigRep b
-            -> (SmartFun sym 'None x a -> SmartFun sym (Union q (Flat x)) y b)
-            -> Beta sym 'None a
-            -> Eta sym (Union (Union q (Flat x)) (Flat y)) b
-        smartF x y a b f ast = smartEta y (smartQ x) b $ f $ smartBeta x a ast
-    -- Beta 'None a? -> Eta (q? + x? + y?) b?
-    -- =>
-    -- 1 : smartBeta ast :: SF None x? a?
-    -- 2 : f 2           :: SF (q? + x?) y? b?
-    -- 3 : smartEta 3    :: Eta (q? + x? + y?) b?
-    --
         smartQ :: forall x . ExtRep x -> QualRep (Union q (Flat x))
         smartQ = undefined
-    --
-    -- ! not shown: assoc of + and flattening of x? & y? !
-    -- 3    :: SF (U q? (F x?)) y? _
-    -- 4    :: Eta (U (U q? (F x?)) (F y?))
-    -- goal :: Eta (U q? (U (F x?) (F y?))) _
+    -- SF q e a -> Eta (q + e) a
+    --   > a ~ (a? -> b?), e ~ (Y x? y?) ~ x? + y?
+    -- SF q (Y x? y?) (a? -> b?) -> Eta (q + x? + y?) (a? -> b?)
+    --   > expand SF def.
+    -- (SF None x? a? -> SF (q + x?) y? b?) -> Eta (q + x? + y?) (a? -> b?)
+    --  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    --                  f
     -- =>
-    -- show : (U (U a b) c) ~ (U a (U b c)
+    -- eta constructed with 'lam' => new goal: sugar f into
+    -- Beta 'None a? -> Eta (q + x? + y?) b?
+    --  ^^^^^^^^^^^
+    --      ast
+    -- =>
+    -- 1 : smartBeta ast :: SF None x? a?
+    -- 2 : f 2           :: SF (q + x?) y? b?
+    -- 3 : smartEta 3    :: Eta (q + x? + y?) b?
+    --
+    -- ! not accounted for: assoc of + and flattening of x? & y? !
+    -- 3    :: Eta (U (U q (F x?)) (F y?)) _
+    -- goal :: Eta (U q (U (F x?) (F y?))) _
+    -- =>
+    -- 1 : F a ~ a
+    -- 2 : (U (U a b) c) ~ (U a (U b c)
+    --
+    smartEta (ExtZ p y) q (SigPred p' b) f | Just Refl <- eqP p p' =
+        undefined
+    -- SF q e a -> Eta (q + e) a
+    --   > a ~ (p? => b?), e ~ (Z p? y?)
+    -- SF q (Z p? y?) (p? => b?) -> Eta (q + (Z p? y?)) (p? => b?)
+    --   > (Z p? y?) ~ p? : y?, expand SF def.
+    -- Ev p? -> SF (p? : q) y? b? -> Eta (q + (p? : y?)) (p? => b?)
+    --  ^^^      ^^^^^^^^^^^^^^^
+    --   e              f
+    -- =>
+    -- 
 
 --------------------------------------------------------------------------------
 -- * Open symbol domains.

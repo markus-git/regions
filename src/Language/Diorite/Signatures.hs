@@ -10,6 +10,7 @@ module Language.Diorite.Signatures
     , Result
     , SigRep(..)
     , Sig(..)
+    , eqP
     , testSig
     , witSig
     , witTypeable
@@ -63,7 +64,7 @@ type family Result (sig :: Signature p *) where
 data SigRep (sig :: Signature p *) where
     SigConst :: Typeable a => SigRep ('Const a)
     SigPart  :: SigRep a -> SigRep sig -> SigRep (a ':-> sig)
-    SigPred  :: Typeable p => Proxy p -> SigRep sig -> SigRep (p ':=> sig)
+    SigPred  :: Typeable q => Proxy q -> SigRep sig -> SigRep (q ':=> sig)
 
 -- | Valid symbol signatures.
 class Sig (sig :: Signature p *) where
@@ -79,6 +80,10 @@ instance (Typeable p, Sig sig) => Sig (p ':=> sig) where
     signature = SigPred Proxy signature
 
 --------------------------------------------------------------------------------
+
+-- | ...
+eqP :: (Typeable a, Typeable b) => Proxy a -> Proxy b -> Maybe (a :~: b)
+eqP _ _ = eqT
 
 -- | Extract a witness of equality of two constant types.
 testConst :: SigRep ('Const a) -> SigRep ('Const b) -> Maybe (a :~: b)
@@ -240,7 +245,7 @@ type family Flat (ps :: Ext p) :: Qualifier p where
 data ExtRep (ex :: Ext p) where
     ExtX :: ExtRep 'X
     ExtY :: ExtRep qs -> ExtRep ps -> ExtRep ('Y qs ps)
-    ExtZ :: Proxy q -> ExtRep qs -> ExtRep ('Z q qs)
+    ExtZ :: Typeable q => Proxy q -> ExtRep qs -> ExtRep ('Z q qs)
 
 flatten :: ExtRep p -> QualRep (Flat p)
 flatten (ExtX)       = QualNone
