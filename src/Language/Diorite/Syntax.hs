@@ -258,7 +258,7 @@ smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
         -> SmartFun sym q e a
         -> Eta sym (Union q (Flat e)) a
     smartEta (ExtX) q (SigConst) f =
-        withDict (witUnionNone q) $
+        withDict (witUnion1 q) $
         Spine f
     -- SF q e a -> Eta (q + e) a
     --   > a ~ (Const a?), e ~ X
@@ -272,7 +272,7 @@ smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
     --
     smartEta (ExtY x y) q (SigPart a b) f =
         withDict (witSig a) $
-        withDict (witUnionAssoc q (flatten x) (flatten y)) $
+        withDict (witUnion2 q (flatten x) (flatten y)) $
         lam (\(v :: Beta sym 'None x) -> smartEta y (smartQ x) b $ f $ smartBeta x a v)
       where
         smartQ :: forall x . ExtRep x -> QualRep (Union q (Flat x))

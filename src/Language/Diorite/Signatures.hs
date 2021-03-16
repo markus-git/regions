@@ -10,7 +10,6 @@ module Language.Diorite.Signatures
     , Result
     , SigRep(..)
     , Sig(..)
-    , eqP
     , testSig
     , witSig
     , witTypeable
@@ -22,22 +21,51 @@ module Language.Diorite.Signatures
     , QualRep(..)
     , Qual(..)
     , (:-)(..)
---  , union
---  , remove
-    , witUnionNone
-    , witUnionRefl
-    , witUnionAssoc
+    , witInsIdem
+    , witRemOrd
+    , witRemDist
+    , witUniIdent
+    , witUniAssoc
     -- * ???
     , Ext(..)
     , Flat
     , ExtRep(..)
     , flatten
+    -- * ...
+    , eqP
     ) where
 
-import Data.Constraint (Dict(..), withDict)
+import Data.Constraint (Dict(..))
 import Data.Proxy (Proxy(..))
-import Data.Type.Equality ((:~:)(..))
+import Data.Type.Equality ((:~:)(..), testEquality)
 import Data.Typeable (Typeable, eqT)
+import Type.Reflection (TypeRep, typeRep)
+-- Hmm..
+import qualified Unsafe.Coerce as Unsafe (unsafeCoerce)
+--import qualified GHC.Exts as Exts (Any)
+
+--------------------------------------------------------------------------------
+-- * ... type-level stuff ...
+--------------------------------------------------------------------------------
+
+-- | ...
+type family (==) (a :: k) (b :: k) :: Bool where
+    a == a = 'True
+    _ == _ = 'False
+  
+-- | ... If-then-else ...
+type family If (c :: Bool) (a :: k) (b :: k) where
+    If 'True  a b = a
+    If 'False a b = b
+
+-- | Short-hand for type inequality.
+type a :/~: b = (a == b) :~: 'False
+
+-- | Get a proof of whether two types are equal or not
+test :: forall k (a :: k) (b :: k) . (Typeable a, Typeable b) => Proxy a -> Proxy b -> Either (a :~: b) (a :/~: b)
+test _ _ = case testEquality (typeRep :: TypeRep a) (typeRep :: TypeRep b) of
+    Just Refl -> Left Refl
+    Nothing   -> Right (Unsafe.unsafeCoerce Refl)
 
 --------------------------------------------------------------------------------
 -- * Signatures.
@@ -81,10 +109,6 @@ instance (Typeable p, Sig sig) => Sig (p ':=> sig) where
 
 --------------------------------------------------------------------------------
 
--- | ...
-eqP :: (Typeable a, Typeable b) => Proxy a -> Proxy b -> Maybe (a :~: b)
-eqP _ _ = eqT
-
 -- | Extract a witness of equality of two constant types.
 testConst :: SigRep ('Const a) -> SigRep ('Const b) -> Maybe (a :~: b)
 testConst SigConst SigConst = eqT
@@ -126,21 +150,19 @@ data Qualifier p =
 infixr 2 :.
 
 -- | ...
-type family Insert q qs where
-    Insert q ('None)    = q ':. 'None
-    Insert q (q ':. qs) = q ':. qs
-    Insert q (a ':. qs) = a ':. Insert q qs
+type family Insert p qs where
+    Insert p ('None)    = p ':. 'None
+    Insert p (q ':. qs) = If (p == q) (q ':. qs) (q ':. Insert p qs)
   
--- | Join the predicates from two sets of qualifiers.
-type family Union qs ps where
-    Union ('None)    ps = ps
-    Union (q ':. qs) ps = Insert q (Union qs ps)
-
 -- | Remove a predicate from a set of qualifiers.
-type family Remove q qs where
+type family Remove p qs where
     Remove _ ('None)    = 'None
-    Remove q (q ':. qs) = qs
-    Remove q (a ':. qs) = a ':. Remove q qs
+    Remove p (q ':. qs) = If (p == q) (qs) (q ':. Remove p qs)
+
+-- | Join the predicates from two sets of qualifiers.
+type family Union ps qs where
+    Union ('None)    qs = qs
+    Union (p ':. ps) qs = p ':. Union ps (Remove p qs)
 
 --------------------------------------------------------------------------------
 -- ** Rep. of a valid qualifier.
@@ -148,7 +170,7 @@ type family Remove q qs where
 -- | Witness of a symbol qualifier.
 data QualRep (qs :: Qualifier p) where
     QualNone  :: QualRep ('None)
-    QualPred  :: Proxy q -> QualRep qs -> QualRep (q ':. qs)
+    QualPred  :: Typeable q => Proxy q -> QualRep qs -> QualRep (q ':. qs)
 
 -- | Valid symbol qualifiers.
 class Qual (qs :: Qualifier p) where
@@ -157,7 +179,7 @@ class Qual (qs :: Qualifier p) where
 instance Qual ('None) where
     qualifier = QualNone
 
-instance Qual qs => Qual (q ':. qs) where
+instance (Typeable q, Qual qs) => Qual (q ':. qs) where
     qualifier = QualPred Proxy qualifier
 
 -- | ...
@@ -174,65 +196,79 @@ instance (qs :- q) => (p ':. qs) :- q where
 -- *** Implementation of ...
 
 -- | Implementation of 'Insert'.
-class InsertC q qs where
-    insert :: Proxy q -> QualRep qs -> QualRep (Insert q qs)
+class Insertable p qs where
+    insert :: Proxy p -> QualRep qs -> QualRep (Insert p qs)
 
-instance InsertC q 'None where
-    insert q (QualNone) = QualPred q QualNone
+instance Typeable p => Insertable p 'None where
+    insert p (QualNone) = QualPred p QualNone
 
-instance {-# OVERLAPS #-} InsertC q (q ':. qs) where
+instance {-# OVERLAPS #-} Insertable p (p ':. qs) where
     insert _ (QualPred q qs) = QualPred q qs
 
-instance {-# OVERLAPPABLE #-} (Insert q (p ':. qs) ~ (p ':. Insert q qs), InsertC q qs) => InsertC q (p ':. qs) where
-    insert q (QualPred p qs) = QualPred p (insert q qs)
-
--- | Implementation of 'Union'.
-class UnionC qs ps where
-    union :: QualRep qs -> QualRep ps -> QualRep (Union qs ps)
-
-instance UnionC 'None ps where
-    union (QualNone) ps = ps
-
-instance (InsertC q (Union qs ps), UnionC qs ps) => UnionC (q ':. qs) ps where
-    union (QualPred q qs) ps = insert q (union qs ps)
+instance {-# OVERLAPPABLE #-} (Insert p (q ':. qs) ~ (q ':. Insert p qs), Insertable p qs) => Insertable p (q ':. qs) where
+    insert p (QualPred q qs) = QualPred q (insert p qs)
 
 -- | Implementation of 'Remove'.
-class RemoveC q qs where
-    remove :: Proxy q -> QualRep qs -> QualRep (Remove q qs)
+class Removeable p qs where
+    remove :: Proxy p -> QualRep qs -> QualRep (Remove p qs)
 
-instance RemoveC 'None q where
-    remove Proxy QualNone = QualNone
+instance Removeable p 'None where
+    remove _ (QualNone) = QualNone
 
-instance {-# OVERLAPS #-} (Remove q qs ~ qs, RemoveC q qs) => RemoveC q (q ':. qs) where
-    remove q (QualPred _ qs) = remove q qs
+instance {-# OVERLAPS #-} Removeable p (p ':. qs) where
+    remove _ (QualPred _ qs) = qs
 
-instance {-# OVERLAPPABLE #-} (Remove q (p ':. qs) ~ (p ':. Remove q qs), RemoveC q qs) => RemoveC q (p ':. qs) where
-    remove q (QualPred p qs) = QualPred p (remove q qs)
+instance {-# OVERLAPPABLE #-} (Remove p (q ':. qs) ~ (q ':. Remove p qs), Removeable p qs) => Removeable p (q ':. qs) where
+    remove p (QualPred q qs) = QualPred q (remove p qs)
+
+-- | Implementation of 'Union'.
+class Unionable ps qs where
+    union :: QualRep ps -> QualRep qs -> QualRep (Union ps qs)
+
+instance Unionable 'None qs where
+    union (QualNone) qs = qs
+
+instance (Removeable p qs, Unionable ps (Remove p qs)) => Unionable (p ':. ps) qs where
+    union (QualPred p ps) qs = QualPred p (union ps (remove p qs))
 
 --------------------------------------------------------------------------------
 -- *** Witness of ...
 
-witUnionNone :: QualRep a -> Dict (Union a 'None ~ a)
-witUnionNone (QualNone) = Dict
-witUnionNone (QualPred a as)
-    | Dict <- witUnionNone as
-    = undefined
+witInsIdem :: Typeable a => Proxy a -> QualRep b -> Insert a (Insert a b) :~: Insert a b
+witInsIdem _ (QualNone)      = Refl
+witInsIdem a (QualPred b bs) | Refl <- witInsIdem a bs =
+    case test a b of
+        Left  Refl -> Refl
+        Right Refl -> Refl
 
-witUnionRefl :: QualRep a -> QualRep b -> Dict (Union a b ~ Union b a)
-witUnionRefl (QualNone) b | Dict <- witUnionNone b = Dict
-witUnionRefl (QualPred a as) b
-    | Dict <- witUnionRefl as b
-    = undefined
+witRemOrd :: (Typeable a, Typeable b) => Proxy a -> Proxy b -> QualRep c -> Remove a (Remove b c) :~: Remove b (Remove a c)
+witRemOrd _ _ (QualNone)      = Refl
+witRemOrd a b (QualPred c cs) | Refl <- witRemOrd a b cs =
+    case (test a c, test b c) of
+        (Left  Refl, Left  Refl) -> Refl
+        (Right Refl, Right Refl) -> Refl
+        (Left  Refl, Right Refl) -> Refl
+        (Right Refl, Left  Refl) -> Refl
 
-witUnionAssoc :: QualRep a -> QualRep b -> QualRep c
-  -> Dict (Union a (Union b c) ~ Union (Union a b) c)
-witUnionAssoc (QualNone) b c = Dict
-witUnionAssoc (QualPred a as) b c
-    | Dict <- witUnionAssoc as b c
-    = undefined
+witRemDist :: forall a b c . Typeable a => Proxy a -> QualRep b -> QualRep c -> Remove a (Union b c) :~: Union (Remove a b) (Remove a c)
+witRemDist _ (QualNone)      _ = Refl
+witRemDist a (QualPred b bs) c =
+    case test a b of
+        Left  Refl -> Refl
+        Right Refl -> undefined
+  where
+    lhs :: forall q qs . Removeable q c => Proxy q -> QualRep qs -> (q ':. Remove a (Union qs (Remove q c))) :~: (q ':. Union (Remove a qs) (Remove a (Remove q c)))
+    lhs q qs | Refl <- witRemDist a qs (remove q c) = Refl
+
+witUniIdent :: QualRep a -> Union a 'None :~: a
+witUniIdent (QualNone)      = Refl
+witUniIdent (QualPred _ as) | Refl <- witUniIdent as = Refl
+
+witUniAssoc :: QualRep a -> QualRep b -> QualRep c -> Union a (Union b c) :~: Union (Union a b) c
+witUniAssoc = undefined
 
 --------------------------------------------------------------------------------
--- *
+-- * ???
 --------------------------------------------------------------------------------
 
 data Ext p = X | Y (Ext p) (Ext p) | Z p (Ext p)
@@ -248,9 +284,15 @@ data ExtRep (ex :: Ext p) where
     ExtZ :: Typeable q => Proxy q -> ExtRep qs -> ExtRep ('Z q qs)
 
 flatten :: ExtRep p -> QualRep (Flat p)
-flatten (ExtX)       = QualNone
-flatten (ExtY ps rs) = undefined --union (flatten ps) (flatten rs)
-flatten (ExtZ p  rs) = undefined --insert p (flatten rs)
+flatten = undefined
+
+--------------------------------------------------------------------------------
+-- * ...
+--------------------------------------------------------------------------------
+
+-- | ...
+eqP :: (Typeable a, Typeable b) => Proxy a -> Proxy b -> Maybe (a :~: b)
+eqP _ _ = eqT
 
 --------------------------------------------------------------------------------
 -- Fin.
