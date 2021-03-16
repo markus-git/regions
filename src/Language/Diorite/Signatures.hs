@@ -208,6 +208,12 @@ instance {-# OVERLAPS #-} Insertable p (p ':. qs) where
 instance {-# OVERLAPPABLE #-} (Insert p (q ':. qs) ~ (q ':. Insert p qs), Insertable p qs) => Insertable p (q ':. qs) where
     insert p (QualPred q qs) = QualPred q (insert p qs)
 
+insert' :: Typeable p => Proxy p -> QualRep qs -> QualRep (Insert p qs)
+insert' p (QualNone)      = QualPred p QualNone
+insert' p (QualPred q qs) = case test p q of
+    Left  Refl -> QualPred q qs
+    Right Refl -> QualPred q (insert' p qs)
+
 -- | Implementation of 'Remove'.
 class Removeable p qs where
     remove :: Proxy p -> QualRep qs -> QualRep (Remove p qs)
@@ -221,6 +227,12 @@ instance {-# OVERLAPS #-} Removeable p (p ':. qs) where
 instance {-# OVERLAPPABLE #-} (Remove p (q ':. qs) ~ (q ':. Remove p qs), Removeable p qs) => Removeable p (q ':. qs) where
     remove p (QualPred q qs) = QualPred q (remove p qs)
 
+remove' :: Typeable p => Proxy p -> QualRep qs -> QualRep (Remove p qs)
+remove' _ (QualNone)      = QualNone
+remove' p (QualPred q qs) = case test p q of
+    Left  Refl -> qs
+    Right Refl -> QualPred q (remove' p qs)
+
 -- | Implementation of 'Union'.
 class Unionable ps qs where
     union :: QualRep ps -> QualRep qs -> QualRep (Union ps qs)
@@ -231,18 +243,22 @@ instance Unionable 'None qs where
 instance (Removeable p qs, Unionable ps (Remove p qs)) => Unionable (p ':. ps) qs where
     union (QualPred p ps) qs = QualPred p (union ps (remove p qs))
 
+union' :: QualRep ps -> QualRep qs -> QualRep (Union ps qs)
+union' (QualNone)      qs = qs
+union' (QualPred p ps) qs = QualPred p (union' ps (remove' p qs))
+
 --------------------------------------------------------------------------------
 -- *** Witness of ...
 
 witInsIdem :: Typeable a => Proxy a -> QualRep b -> Insert a (Insert a b) :~: Insert a b
-witInsIdem _ (QualNone)      = Refl
+witInsIdem _ (QualNone) = Refl
 witInsIdem a (QualPred b bs) | Refl <- witInsIdem a bs =
     case test a b of
         Left  Refl -> Refl
         Right Refl -> Refl
 
 witRemOrd :: (Typeable a, Typeable b) => Proxy a -> Proxy b -> QualRep c -> Remove a (Remove b c) :~: Remove b (Remove a c)
-witRemOrd _ _ (QualNone)      = Refl
+witRemOrd _ _ (QualNone) = Refl
 witRemOrd a b (QualPred c cs) | Refl <- witRemOrd a b cs =
     case (test a c, test b c) of
         (Left  Refl, Left  Refl) -> Refl
@@ -251,21 +267,34 @@ witRemOrd a b (QualPred c cs) | Refl <- witRemOrd a b cs =
         (Right Refl, Left  Refl) -> Refl
 
 witRemDist :: forall a b c . Typeable a => Proxy a -> QualRep b -> QualRep c -> Remove a (Union b c) :~: Union (Remove a b) (Remove a c)
-witRemDist _ (QualNone)      _ = Refl
-witRemDist a (QualPred b bs) c =
+witRemDist _ (QualNone) _ = Refl
+witRemDist a (QualPred (b :: Proxy q) (bs :: QualRep qs)) c =
     case test a b of
         Left  Refl -> Refl
-        Right Refl -> undefined
+        Right Refl -> case (lhs, rhs) of
+            (Refl, Refl) -> Refl
   where
-    lhs :: forall q qs . Removeable q c => Proxy q -> QualRep qs -> (q ':. Remove a (Union qs (Remove q c))) :~: (q ':. Union (Remove a qs) (Remove a (Remove q c)))
-    lhs q qs | Refl <- witRemDist a qs (remove q c) = Refl
+    lhs :: (q ':. Remove a (Union qs (Remove q c))) :~: (q ':. Union (Remove a qs) (Remove a (Remove q c)))
+    lhs = case witRemDist a bs (remove' b c) of Refl -> Refl
+
+    rhs :: Union (q ':. Remove a qs) (Remove a c) :~: (q ':. Union (Remove a qs) (Remove a (Remove q c)))
+    rhs = case witRemOrd a b c of Refl -> Refl
 
 witUniIdent :: QualRep a -> Union a 'None :~: a
-witUniIdent (QualNone)      = Refl
+witUniIdent (QualNone) = Refl
 witUniIdent (QualPred _ as) | Refl <- witUniIdent as = Refl
 
-witUniAssoc :: QualRep a -> QualRep b -> QualRep c -> Union a (Union b c) :~: Union (Union a b) c
-witUniAssoc = undefined
+witUniAssoc :: forall a b c . QualRep a -> QualRep b -> QualRep c -> Union a (Union b c) :~: Union (Union a b) c
+witUniAssoc (QualNone) _ _ = Refl
+witUniAssoc (QualPred (a :: Proxy q) (as :: QualRep qs)) b c =
+    case (lhs, rhs) of
+        (Refl, Refl) -> Refl
+  where
+    lhs :: Union (q ':. qs) (Union b c) :~: (q ':. Union qs (Union (Remove q b) (Remove q c)))
+    lhs = case witRemDist a b c of Refl -> Refl
+    
+    rhs :: Union (Union (q ':. qs) b) c :~: (q ':. Union qs (Union (Remove q b) (Remove q c)))
+    rhs = case witUniAssoc as (remove' a b) (remove' a c) of Refl -> Refl
 
 --------------------------------------------------------------------------------
 -- * ???
