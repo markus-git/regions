@@ -21,6 +21,9 @@ module Language.Diorite.Signatures
     , QualRep(..)
     , Qual(..)
     , (:-)(..)
+    , insert'
+    , remove'
+    , union'
     , witInsIdem
     , witRemOrd
     , witRemDist
@@ -30,7 +33,7 @@ module Language.Diorite.Signatures
     , Ext(..)
     , Flat
     , ExtRep(..)
-    , flatten
+    , flatten'
     -- * ...
     , eqP
     ) where
@@ -312,8 +315,10 @@ data ExtRep (ex :: Ext p) where
     ExtY :: ExtRep qs -> ExtRep ps -> ExtRep ('Y qs ps)
     ExtZ :: Typeable q => Proxy q -> ExtRep qs -> ExtRep ('Z q qs)
 
-flatten :: ExtRep p -> QualRep (Flat p)
-flatten = undefined
+flatten' :: ExtRep p -> QualRep (Flat p)
+flatten' (ExtX)       = QualNone
+flatten' (ExtY ps rs) = union' (flatten' ps) (flatten' rs)
+flatten' (ExtZ p  rs) = insert' p (flatten' rs)
 
 --------------------------------------------------------------------------------
 -- * ...
