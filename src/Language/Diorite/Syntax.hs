@@ -19,10 +19,11 @@ module Language.Diorite.Syntax
     , lam
     , elam
     -- * "Smart" constructors.
-    , SmartFun
+    , SmartBeta
+    , SmartEta
     , SmartSig
     , SmartSym
---  , smartSym'
+    , smartSym'
     -- * Open symbol domains.
     , Empty
     , (:+:)(..)
@@ -39,10 +40,8 @@ module Language.Diorite.Syntax
 
 import Language.Diorite.Signatures
 
-import Data.Constraint (Dict(..), withDict)
-import Data.Proxy (Proxy(..))
+import Data.Constraint (withDict)
 import Data.Type.Equality ((:~:)(..))
-import Data.Typeable (Typeable, eqT)
 
 --------------------------------------------------------------------------------
 -- * Abstract syntax tree.
@@ -129,31 +128,17 @@ elam f = Ev v :\\ body
 --------------------------------------------------------------------------------
 -- ** "Smart" constructors.
 
---  # Original idea.
---  SmartFun' (sym :: Signature p * -> *) (sig :: Signature p *) where
---  SmartFun' sym ('Const a) = \qs . Beta sym qs ('Const a)
---  SmartFun' sym (a ':-> b) = \qs . (exists ps . (SmartFun' sym a) ps -> (SmartFun' sym b) (Union ps qs))
---  SmartFun' sym (q ':=> b) = \qs . Ev q -> (SmartFun sym b) (Insert q qs)
---
---  # Functions merged with 'SmartFun'.
---  SmartFun (sym :: Signature p * -> *) (qs :: Qualifier p) (sig :: Signature p *) where
---  SmartFun sym qs ('Const a) = Beta sym qs ('Const a)
---  SmartFun sym qs (a ':-> b) = (exists ps . SmartFun sym ps a -> SmartFun sym (Union qs ps) b)
---  SmartFun sym qs (q ':=> b) = Ev q -> SmartFun sym (Insert q qs) b
---
--- # Swap 'exists' for 'forall' arg?
-
 -- | Map a symbol to its corresponding "smart" constructor.
-type family SmartFun (sym :: Signature p * -> *)
-                     (qs :: Qualifier p)
-                     (ex :: Ext p)
-                     (sig :: Signature p *)
-  where
-    SmartFun sym qs ('X)       ('Const a) = Beta sym qs ('Const a)
-    SmartFun sym qs ('Y ps rs) (a ':-> b) = SmartFun sym 'None ps a -> SmartFun sym (Union qs (Flat ps)) rs b
-    SmartFun sym qs ('Z q rs)  (q ':=> b) = Ev q -> SmartFun sym (q ':. qs) rs b
+type family SmartBeta (sym :: Signature p * -> *) (qs :: Qualifier p) (ex :: Ext p) (sig :: Signature p *) where
+    SmartBeta sym qs ('X)       ('Const a) = Beta sym qs ('Const a)
+    SmartBeta sym qs ('Y ps rs) (a ':-> b) = SmartBeta sym 'None ps a -> SmartBeta sym (Union qs (Flat ps)) rs b
+    SmartBeta sym qs ('Z q rs)  (q ':=> b) = Ev q -> SmartBeta sym (q ':. qs) rs b
 
---------------------------------------------------------------------------------
+-- | ...
+type family SmartEta (sym :: Signature p * -> *) (qs :: Qualifier p) (ex :: Ext p) (sig :: Signature p *) where
+    SmartEta sym qs ('X)       ('Const a) = Beta sym qs ('Const a)
+    SmartEta sym qs ('Y ps rs) (a ':-> b) = SmartEta sym 'None ps a -> SmartEta sym (Union qs (Flat ps)) rs b
+    SmartEta sym qs ('Z q rs)  (q ':=> b) = Ev q -> SmartEta sym (Remove q qs) rs b
 
 -- | Reconstruct a symbol's signature.
 type family SmartSig f :: Signature p * where
@@ -175,31 +160,10 @@ type family SmartSym f :: Signature p * -> * where
 
 --------------------------------------------------------------------------------
 
--- # Original idea.
--- smartSym' :: forall sym (sig :: Signature p *) f
---    .  ( Sig sig
---        , f   ~ SmartFun sym sig
---        , sig ~ SmartSig  f
---        , sym ~ SmartSym  f
---        )
---     => sym sig -> f
--- smartSym' sym = smartBeta (signature :: SigRep sig) (Sym sym)
---   where
---     smartBeta :: forall a . SigRep a -> Beta sym 'None a -> SmartFun sym a
---     smartBeta (SigConst)    ast = ast
---     smartBeta (SigPart a b) ast = \f -> smartBeta b (ast :$ smartEta a f)
-
---     smartEta :: forall a . SigRep a -> SmartFun sym a -> Eta sym 'None a
---     smartEta (SigConst)    f = Spine f
---     smartEta (SigPart a b) f = withDict (witSig a)
---         (lam (smartEta b . f . smartBeta a))
---
--- # ...
-
 -- | Make a "smart" constructor for a symbol.
 smartSym' :: forall (ex :: Ext p) sym (sig :: Signature p *) f
     .  ( Sig sig
-       , f   ~ SmartFun sym 'None ex sig
+       , f   ~ SmartBeta sym 'None ex sig
        , sig ~ SmartSig  f
        , sym ~ SmartSym  f
        )
@@ -210,7 +174,7 @@ smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
            ExtRep e
         -> SigRep a
         -> Beta sym q a
-        -> SmartFun sym q e a
+        -> SmartBeta sym q e a
     smartBeta (ExtX) (SigConst) ast = ast
     -- Beta q a -> SF q e a?
     --   > a ~ (Const a?), e ~ X
@@ -255,7 +219,7 @@ smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
            ExtRep e
         -> QualRep q
         -> SigRep a
-        -> SmartFun sym q e a
+        -> SmartBeta sym q e a
         -> Eta sym (Union q (Flat e)) a
     smartEta (ExtX) q (SigConst) f =
         withDict (witUniIdent q) $
@@ -299,7 +263,7 @@ smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
     -- goal :: Eta (U q (U (F x?) (F y?))) _
     -- =>
     -- 1 : F a ~ a
-    -- 2 : (U (U a b) c) ~ (U a (U b c)
+    -- 2 : (U (U a b) c) ~ (U a (U b c))
     --
     smartEta (ExtZ p y) q (SigPred p' b) f | Just Refl <- eqP p p' =
         undefined
@@ -307,11 +271,14 @@ smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
     --   > a ~ (p? => b?), e ~ (Z p? y?)
     -- SF q (Z p? y?) (p? => b?) -> Eta (q + (Z p? y?)) (p? => b?)
     --   > (Z p? y?) ~ p? : y?, expand SF def.
-    -- Ev p? -> SF (p? : q) y? b? -> Eta (q + (p? : y?)) (p? => b?)
-    --  ^^^      ^^^^^^^^^^^^^^^
-    --   e              f
+    -- (Ev p? -> SF (p? : q) y? b?) -> Eta (q + (p? : y?)) (p? => b?)
+    --  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    --              f
     -- =>
-    -- 
+    -- eta constructed with 'elam' => new goal: sugar f into
+    -- (Ev q -> Eta sym qs b)
+    -- 1 :
+    smartEta _ _ _ _ = error "What?!"
 
 --------------------------------------------------------------------------------
 -- * Open symbol domains.
@@ -378,7 +345,7 @@ instance {-# OVERLAPS #-} (sym1 :<: sym3) => (sym1 :<: (sym2 :+: sym3)) where
 -- | Make a "smart" constructor for a symbol.
 smartSym :: forall p sup sub (sig :: Signature p *) f
     .  ( Sig sig
-       , f   ~ SmartFun sup sig
+       , f   ~ SmartBeta sup sig
        , sig ~ SmartSig f
        , sup ~ SmartSym f
        , sub :<: sup

@@ -10,8 +10,8 @@ module Language.Diorite.Interpretation
     , Denotation
     ) where
 
-import Language.Diorite.Syntax
-    (Signature(..), Ev(..), Beta(..), Eta(..), (:+:)(..))
+import Language.Diorite.Signatures (Signature(..))
+import Language.Diorite.Syntax (Ev(..), Beta(..), Eta(..), (:+:)(..))
 
 import qualified Control.Applicative as A
 

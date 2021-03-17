@@ -2,11 +2,12 @@
 
 module SmartSym where
 
+import Language.Diorite.Signatures (Signature(..), Qualifier(..))
 import Language.Diorite.Syntax
 import Language.Diorite.Interpretation
 
 --------------------------------------------------------------------------------
--- * 'smartSym' translates a symbol's signature into the expected function.
+-- * 'smartSym' translations without qualifiers.
 --------------------------------------------------------------------------------
 
 data Put a
@@ -23,24 +24,18 @@ instance Render S where
 
 type B a = Beta S ('None :: Qualifier (Put *)) ('Const a)
 
-type BQ q a = Beta S (q :: Qualifier (Put *)) ('Const a)
-
 --------------------------------------------------------------------------------
 
--- 'Const a => forall q . BQ q a
--- a ':-> b => 
-
-x, xs ::                        BQ 'None Int -> (BQ 'None Int -> BQ 'None Int) -> BQ 'None Int
-x, xs :: forall q1 q2 . Ev p -> BQ q1 Int    -> (BQ q2 Int    -> BQ q2 Int)    -> BQ (p + Union q1 q2) Int
+x, xs :: B Int -> (B Int -> B Int) -> B Int
 x  = \a -> \f -> Sym X :$ Spine a :$ (lam (\v -> Spine (f v)))
 xs = smartSym' X
 
 y, ys :: ((B Int -> B Int) -> B Int) -> B Int
-y  = \f -> Sym Y :$ (lam (\v -> Spine (f (\b -> v :$ (Spine b)))))
+y  = \f -> Sym Y :$ lam (\v -> Spine (f (\b -> v :$ (Spine b))))
 ys = smartSym' Y
 
 z, zs :: (B Int -> (B Int -> B Int)) -> B Int
-z  = \f -> Sym Z :$ (lam (\b1 -> (lam (\b2 -> Spine (f b1 b2)))))
+z  = \f -> Sym Z :$ lam (\b1 -> (lam (\b2 -> Spine (f b1 b2))))
 zs = smartSym' Z
 
 --------------------------------------------------------------------------------
