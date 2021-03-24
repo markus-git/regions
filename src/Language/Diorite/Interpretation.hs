@@ -42,10 +42,10 @@ instance Render (A.Const String) where
 
 -- | Render a 'Beta' tree as concrete syntax.
 renderBeta :: Render sym => [String] -> Beta sym qs a -> String
-renderBeta args (Var n)     = renderArgs args (A.Const ('v' : show n))
-renderBeta args (Sym s)     = renderArgs args s
-renderBeta args (s :$ e)    = renderBeta (renderEta e : args) s
-renderBeta args (s :# p)    = renderBeta (('r' : renderSym p) : args) s
+renderBeta args (Var n)  = renderArgs args (A.Const ('v' : show n))
+renderBeta args (Sym s)  = renderArgs args s
+renderBeta args (s :$ e) = renderBeta (renderEta e : args) s
+renderBeta args (s :# p) = renderBeta (('r' : renderSym p) : args) s
 
 -- | Render an 'Eta' spine as concrete syntax.
 renderEta :: Render sym => Eta sym qs a -> String

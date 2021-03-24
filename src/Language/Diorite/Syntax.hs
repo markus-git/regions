@@ -20,7 +20,6 @@ module Language.Diorite.Syntax
     , elam
     -- * "Smart" constructors.
     , SmartBeta
-    , SmartEta
     , SmartSig
     , SmartSym
     , smartSym'
@@ -41,6 +40,7 @@ module Language.Diorite.Syntax
 import Language.Diorite.Signatures
 
 import Data.Constraint (withDict)
+import Data.Proxy (Proxy(..))
 import Data.Type.Equality ((:~:)(..))
 
 --------------------------------------------------------------------------------
@@ -70,7 +70,7 @@ data Eta sym (qs :: Qualifier p) (sig :: Signature p *) where
     -- ^ Abstraction.
     (:\)  :: Sig a => Name -> Eta sym qs sig -> Eta sym qs (a ':-> sig)
     -- ^ Evidence-abstraction.
-    (:\\) :: (Qual qs, qs :- q) => Ev q -> Eta sym qs sig -> Eta sym (Remove q qs) (q ':=> sig)
+    (:\\) :: Ev q -> Eta sym (q ':. qs) sig -> Eta sym qs (q ':=> sig)
 
 infixl 1 :$, :#
 infixr 9 :\, :\\
@@ -119,7 +119,7 @@ maxEvEta (Spine b)    = maxEvBeta b
     maxEvBeta _             = 0
 
 -- | Interface for evidence binding.
-elam :: (Qual qs, qs :- q) => (Ev q -> Eta sym qs b) -> Eta sym (Remove q qs) (q ':=> b)
+elam :: (Ev q -> Eta sym (q ':. qs) b) -> Eta sym qs (q ':=> b)
 elam f = Ev v :\\ body
   where
     v    = maxEvEta body + 1
@@ -133,12 +133,6 @@ type family SmartBeta (sym :: Signature p * -> *) (qs :: Qualifier p) (ex :: Ext
     SmartBeta sym qs ('X)       ('Const a) = Beta sym qs ('Const a)
     SmartBeta sym qs ('Y ps rs) (a ':-> b) = SmartBeta sym 'None ps a -> SmartBeta sym (Union qs (Flat ps)) rs b
     SmartBeta sym qs ('Z q rs)  (q ':=> b) = Ev q -> SmartBeta sym (q ':. qs) rs b
-
--- | ...
-type family SmartEta (sym :: Signature p * -> *) (qs :: Qualifier p) (ex :: Ext p) (sig :: Signature p *) where
-    SmartEta sym qs ('X)       ('Const a) = Beta sym qs ('Const a)
-    SmartEta sym qs ('Y ps rs) (a ':-> b) = SmartEta sym 'None ps a -> SmartEta sym (Union qs (Flat ps)) rs b
-    SmartEta sym qs ('Z q rs)  (q ':=> b) = Ev q -> SmartEta sym (Remove q qs) rs b
 
 -- | Reconstruct a symbol's signature.
 type family SmartSig f :: Signature p * where
@@ -200,9 +194,9 @@ smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
     -- 2 : ast :$ 1    :: Beta (q + x?) b?
     -- 3 : smartBeta 2 :: SF (q + x?) y? b?
     --
-    smartBeta (ExtZ p y) (SigPred p' b) ast | Just Refl <- eqP p p' =
+    smartBeta (ExtZ _ p y) (SigPred p' b) ast | Just Refl <- eqP p p' =
         \e -> smartBeta y b (ast :# e)
-    -- Beta q a? -> SF q e a
+    -- Beta q a -> SF q e a
     --   > a ~ (p? => b?), e ~ (Z p? y?)
     -- Beta q (p? => b?) -> SF q (Z p? y?) (p? => b?)
     --   > expand SF def.
@@ -237,7 +231,8 @@ smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
     smartEta (ExtY (x :: ExtRep x) (y :: ExtRep y)) q (SigPart a b) f =
         withDict (witSig a) $
         withDict (witUniAssoc q fx fy) $
-        lam (\(v :: Beta sym 'None v) -> smartEta y (union' q fx) b $ f $ smartBeta x a v)
+        lam (\(v :: Beta sym 'None v) ->
+            smartEta y (union' q fx) b $ f $ smartBeta x a v)
       where
         fx = flatten' x
         fy = flatten' y
@@ -248,15 +243,20 @@ smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
     -- (SF None x? a? -> SF (q + x?) y? b?) -> Eta (q + x? + y?) (a? -> b?)
     --  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     --                  f
-    -- =>
-    -- eta constructed with 'lam' => new goal: sugar f into
+    --
+    -- ! eta constructed with 'lam' !
+    -- lam :: (Beta q' a' -> Eta q' b') -> Eta q' (a' -> b')
+    -- 
+    -- ==> new goal: sugar f so that it fits arg. of 'lam'.
     -- Beta 'None a? -> Eta (q + x? + y?) b?
     --  ^^^^^^^^^^^
     --      ast
     -- =>
-    -- 1 : smartBeta ast :: SF None x? a?
-    -- 2 : f 2           :: SF (q + x?) y? b?
-    -- 3 : smartEta 3    :: Eta (q + x? + y?) b?
+    -- 1 : smartBeta ast  :: SF None x? a?
+    -- 2 : f 2            :: SF (q + x?) y? b?
+    -- 3 : smartEta 3     :: Eta (q + x? + y?) b?
+    -- =>
+    -- 4 : lam (\ast . 3) :: Eta (q + x? + y?) (a? -> b?)
     --
     -- ! not accounted for: assoc of + and flattening of x? & y? !
     -- 3    :: Eta (U (U q (F x?)) (F y?)) _
@@ -265,19 +265,36 @@ smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
     -- 1 : F a ~ a
     -- 2 : (U (U a b) c) ~ (U a (U b c))
     --
-    smartEta (ExtZ p y) q (SigPred p' b) f | Just Refl <- eqP p p' =
-        undefined
+    smartEta (ExtZ Refl (p :: Proxy x) (y :: ExtRep y)) q (SigPred p' (b :: SigRep b)) f | Just Refl <- eqP p p' =
+        --withDict notin $
+        elam (\(e :: Ev x) -> smartEta y (QualPred p q) b (f e))
+      where
+        --fun :: Ev x -> Eta sym (Union (x ':. q) (Flat y)) b
+        --fun e | Just Refl <- eqP p p' = smartEta y (QualPred p q) b (f e)
+        --notin :: Remove x (Flat y) :~: (Flat y)
+        --notin = undefined
     -- SF q e a -> Eta (q + e) a
     --   > a ~ (p? => b?), e ~ (Z p? y?)
     -- SF q (Z p? y?) (p? => b?) -> Eta (q + (Z p? y?)) (p? => b?)
-    --   > (Z p? y?) ~ p? : y?, expand SF def.
-    -- (Ev p? -> SF (p? : q) y? b?) -> Eta (q + (p? : y?)) (p? => b?)
+    --   > (Z p? y?) ~ y?, expand SF def.
+    -- (Ev p? -> SF (p? : q) y? b?) -> Eta (q + y?) (p? => b?)
     --  ^^^^^^^^^^^^^^^^^^^^^^^^^^
     --              f
+    --
+    -- ! eta constructed with 'elam' !
+    -- elam :: (Ev p' -> Eta (p' : q') b') -> Eta ((p' : q') - p') (p' => b')
+    --
+    -- ==> new goal: sugar f so that it fits arg. of 'elam'.
+    -- Ev p? -> Eta (p? : q + y?) b?
+    --  ^^^
+    --   e
     -- =>
-    -- eta constructed with 'elam' => new goal: sugar f into
-    -- (Ev q -> Eta sym qs b)
-    -- 1 :
+    -- 1 : f e           :: SF (p? : q) y? b?
+    -- 2 : smartEta 1    :: Eta (p? : q + y?) b?
+    -- =>
+    -- 3 : elam (\e . 2) :: Eta ((p? : q + y?) - p?) (p? => b?)
+    --                    ~ Eta (q + y?) (p? => b?)
+    --
     smartEta _ _ _ _ = error "What?!"
 
 --------------------------------------------------------------------------------

@@ -32,6 +32,7 @@ module Language.Diorite.Signatures
     -- * ???
     , Ext(..)
     , Flat
+    , NotIn
     , ExtRep(..)
     , flatten'
     -- * ...
@@ -185,14 +186,16 @@ instance Qual ('None) where
 instance (Typeable q, Qual qs) => Qual (q ':. qs) where
     qualifier = QualPred Proxy qualifier
 
+--------------------------------------------------------------------------------
+
 -- | ...
 class qs :- q where
     entails :: QualRep qs -> Proxy q
 
-instance (q ':. qs) :- q where
+instance {-# OVERLAPS #-} forall k (q :: k) (qs :: Qualifier k) . (q ':. qs) :- q where
     entails (QualPred p _) = p
 
-instance (qs :- q) => (p ':. qs) :- q where
+instance {-# OVERLAPPABLE #-} forall k (q :: k) (qs :: Qualifier k) (p :: k) . (qs :- q) => (p ':. qs) :- q where
     entails (QualPred _ qs) = entails qs
 
 --------------------------------------------------------------------------------
@@ -211,12 +214,6 @@ instance {-# OVERLAPS #-} Insertable p (p ':. qs) where
 instance {-# OVERLAPPABLE #-} (Insert p (q ':. qs) ~ (q ':. Insert p qs), Insertable p qs) => Insertable p (q ':. qs) where
     insert p (QualPred q qs) = QualPred q (insert p qs)
 
-insert' :: Typeable p => Proxy p -> QualRep qs -> QualRep (Insert p qs)
-insert' p (QualNone)      = QualPred p QualNone
-insert' p (QualPred q qs) = case test p q of
-    Left  Refl -> QualPred q qs
-    Right Refl -> QualPred q (insert' p qs)
-
 -- | Implementation of 'Remove'.
 class Removeable p qs where
     remove :: Proxy p -> QualRep qs -> QualRep (Remove p qs)
@@ -230,12 +227,6 @@ instance {-# OVERLAPS #-} Removeable p (p ':. qs) where
 instance {-# OVERLAPPABLE #-} (Remove p (q ':. qs) ~ (q ':. Remove p qs), Removeable p qs) => Removeable p (q ':. qs) where
     remove p (QualPred q qs) = QualPred q (remove p qs)
 
-remove' :: Typeable p => Proxy p -> QualRep qs -> QualRep (Remove p qs)
-remove' _ (QualNone)      = QualNone
-remove' p (QualPred q qs) = case test p q of
-    Left  Refl -> qs
-    Right Refl -> QualPred q (remove' p qs)
-
 -- | Implementation of 'Union'.
 class Unionable ps qs where
     union :: QualRep ps -> QualRep qs -> QualRep (Union ps qs)
@@ -245,6 +236,21 @@ instance Unionable 'None qs where
 
 instance (Removeable p qs, Unionable ps (Remove p qs)) => Unionable (p ':. ps) qs where
     union (QualPred p ps) qs = QualPred p (union ps (remove p qs))
+
+--------------------------------------------------------------------------------
+-- ... or ...
+
+insert' :: Typeable p => Proxy p -> QualRep qs -> QualRep (Insert p qs)
+insert' p (QualNone)      = QualPred p QualNone
+insert' p (QualPred q qs) = case test p q of
+    Left  Refl -> QualPred q qs
+    Right Refl -> QualPred q (insert' p qs)
+
+remove' :: Typeable p => Proxy p -> QualRep qs -> QualRep (Remove p qs)
+remove' _ (QualNone)      = QualNone
+remove' p (QualPred q qs) = case test p q of
+    Left  Refl -> qs
+    Right Refl -> QualPred q (remove' p qs)
 
 union' :: QualRep ps -> QualRep qs -> QualRep (Union ps qs)
 union' (QualNone)      qs = qs
@@ -287,6 +293,9 @@ witUniIdent :: QualRep a -> Union a 'None :~: a
 witUniIdent (QualNone) = Refl
 witUniIdent (QualPred _ as) | Refl <- witUniIdent as = Refl
 
+--witUniIns :: Typeable a => Proxy a -> QualRep b -> QualRep c -> Union (Insert a b) c :~: Insert a (Union b c)
+--witUniIns _ (QualNone) _ = undefined
+
 witUniAssoc :: forall a b c . QualRep a -> QualRep b -> QualRep c -> Union a (Union b c) :~: Union (Union a b) c
 witUniAssoc (QualNone) _ _ = Refl
 witUniAssoc (QualPred (a :: Proxy q) (as :: QualRep qs)) b c =
@@ -308,17 +317,19 @@ data Ext p = X | Y (Ext p) (Ext p) | Z p (Ext p)
 type family Flat (ps :: Ext p) :: Qualifier p where
     Flat ('X)       = 'None
     Flat ('Y ps rs) = Union (Flat ps) (Flat rs)
-    Flat ('Z p  rs) = Insert p (Flat rs)
+    Flat ('Z p  rs) = Flat rs
+
+type NotIn p ps = Remove p (Flat ps) :~: (Flat ps)
 
 data ExtRep (ex :: Ext p) where
     ExtX :: ExtRep 'X
     ExtY :: ExtRep qs -> ExtRep ps -> ExtRep ('Y qs ps)
-    ExtZ :: Typeable q => Proxy q -> ExtRep qs -> ExtRep ('Z q qs)
+    ExtZ :: Typeable q => NotIn q qs -> Proxy q -> ExtRep qs -> ExtRep ('Z q qs)
 
 flatten' :: ExtRep p -> QualRep (Flat p)
-flatten' (ExtX)       = QualNone
-flatten' (ExtY ps rs) = union' (flatten' ps) (flatten' rs)
-flatten' (ExtZ p  rs) = insert' p (flatten' rs)
+flatten' (ExtX)        = QualNone
+flatten' (ExtY ps rs)  = union' (flatten' ps) (flatten' rs)
+flatten' (ExtZ _ _ rs) = flatten' rs
 
 --------------------------------------------------------------------------------
 -- * ...
