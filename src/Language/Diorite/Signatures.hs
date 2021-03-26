@@ -35,6 +35,7 @@ module Language.Diorite.Signatures
     , NotIn
     , ExtRep(..)
     , flatten'
+    , ExtC(..)
     -- * ...
     , eqP
     ) where
@@ -330,6 +331,18 @@ flatten' :: ExtRep p -> QualRep (Flat p)
 flatten' (ExtX)        = QualNone
 flatten' (ExtY ps rs)  = union' (flatten' ps) (flatten' rs)
 flatten' (ExtZ _ _ rs) = flatten' rs
+
+class ExtC (ex :: Ext p) where
+    ext :: ExtRep ex
+
+instance ExtC ('X) where
+    ext = ExtX
+
+instance (ExtC ps, ExtC rs) => ExtC ('Y ps rs) where
+    ext = ExtY ext ext
+
+instance (Typeable p, Remove p (Flat rs) ~ (Flat rs), ExtC rs) => ExtC ('Z p rs) where
+    ext = ExtZ Refl Proxy ext
 
 --------------------------------------------------------------------------------
 -- * ...

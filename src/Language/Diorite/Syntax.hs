@@ -21,6 +21,8 @@ module Language.Diorite.Syntax
     -- * "Smart" constructors.
     , SmartBeta
     , SmartSig
+    , SmartQual
+    , SmartExt
     , SmartSym
     , smartSym'
     -- * Open symbol domains.
@@ -146,6 +148,12 @@ type family SmartQual f :: Qualifier p where
     SmartQual (Ev _ -> f) = SmartQual f
     SmartQual (_ -> f)    = SmartQual f
 
+-- | ...
+type family SmartExt f :: Ext p where
+    SmartExt (AST _ _ _) = 'X
+    SmartExt (Ev p -> f) = 'Z p (SmartExt f)
+    SmartExt (a -> f)    = 'Y (SmartExt a) (SmartExt f)
+
 -- | Fetch the symbol of a "smart" constructor.
 type family SmartSym f :: Signature p * -> * where
     SmartSym (AST s _ _) = s
@@ -158,143 +166,33 @@ type family SmartSym f :: Signature p * -> * where
 smartSym' :: forall (ex :: Ext p) sym (sig :: Signature p *) f
     .  ( Sig sig
        , f   ~ SmartBeta sym 'None ex sig
-       , sig ~ SmartSig  f
-       , sym ~ SmartSym  f
+       , ex  ~ SmartExt f
+       , sig ~ SmartSig f
+       , sym ~ SmartSym f
        )
     => ExtRep ex -> sym sig -> f
 smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
   where
-    smartBeta :: forall e q a .
-           ExtRep e
-        -> SigRep a
-        -> Beta sym q a
-        -> SmartBeta sym q e a
+    smartBeta :: forall e q a . ExtRep e -> SigRep a -> Beta sym q a -> SmartBeta sym q e a
     smartBeta (ExtX) (SigConst) ast = ast
-    -- Beta q a -> SF q e a?
-    --   > a ~ (Const a?), e ~ X
-    -- Beta q (Const a?) -> SF q X (Const a?)
-    --   > expand SF def.
-    -- Beta q (Const a?) -> Beta q (Const a?)
-    --  ^^^^^^^^^^^^^^^^
-    --        ast
-    -- =>
-    -- 1 : ast :: Beta q (Const a?)
-    --
     smartBeta (ExtY x y) (SigPart a b) ast =
         \f -> smartBeta y b (ast :$ smartEta x QualNone a f)
-    -- Beta q a -> SF q e a
-    --   > a ~ (a? -> b?), e ~ (Y x? y?) ~ x? + y?
-    -- Beta q (a? -> b?) -> SF q (x? + y?) (a? -> b?)
-    --   > expand SF def.
-    -- Beta q (a? -> b?) -> SF 'None x? a? -> SF (q + x?) y? b?
-    --  ^^^^^^^^^^^^^^^^     ^^^^^^^^^^^^
-    --        ast                  f
-    -- =>
-    -- 1 : smartEta f  :: Eta ('None + x?) a? ~ Eta x? a?
-    -- 2 : ast :$ 1    :: Beta (q + x?) b?
-    -- 3 : smartBeta 2 :: SF (q + x?) y? b?
-    --
     smartBeta (ExtZ _ p y) (SigPred p' b) ast | Just Refl <- eqP p p' =
         \e -> smartBeta y b (ast :# e)
-    -- Beta q a -> SF q e a
-    --   > a ~ (p? => b?), e ~ (Z p? y?)
-    -- Beta q (p? => b?) -> SF q (Z p? y?) (p? => b?)
-    --   > expand SF def.
-    -- Beta q (p? => b?) -> Ev p? -> SF (p? : q) y? b?
-    --  ^^^^^^^^^^^^^^^      ^^^
-    --        ast             e
-    -- =>
-    -- 1 : ast :# e    :: Beta (p? : q) b?
-    -- 2 : smartBeta 1 :: SF (p? : q) y? b?
-    --
     smartBeta _ _ _ = error "What?!"
 
-    smartEta :: forall e q a .
-           ExtRep e
-        -> QualRep q
-        -> SigRep a
-        -> SmartBeta sym q e a
-        -> Eta sym (Union q (Flat e)) a
+    smartEta :: forall e q a . ExtRep e -> QualRep q -> SigRep a -> SmartBeta sym q e a -> Eta sym (Union q (Flat e)) a
     smartEta (ExtX) q (SigConst) f =
         withDict (witUniIdent q) $
         Spine f
-    -- SF q e a -> Eta (q + e) a
-    --   > a ~ (Const a?), e ~ X
-    -- SF q X (Const a?) -> Eta (q + X) (Const a?)
-    --   > q + X ~ q, expand SF def.
-    -- Beta q (Const a?) -> Eta q (Const a?)
-    --  ^^^^^^^^^^^^^^^^
-    --         f
-    -- =>
-    -- 1 : Spine f :: Eta q (Const a?)
-    --
     smartEta (ExtY (x :: ExtRep x) (y :: ExtRep y)) q (SigPart a b) f =
+        let fx = flatten' x in
+        let fy = flatten' y in
         withDict (witSig a) $
         withDict (witUniAssoc q fx fy) $
-        lam (\(v :: Beta sym 'None v) ->
-            smartEta y (union' q fx) b $ f $ smartBeta x a v)
-      where
-        fx = flatten' x
-        fy = flatten' y
-    -- SF q e a -> Eta (q + e) a
-    --   > a ~ (a? -> b?), e ~ (Y x? y?) ~ x? + y?
-    -- SF q (Y x? y?) (a? -> b?) -> Eta (q + x? + y?) (a? -> b?)
-    --   > expand SF def.
-    -- (SF None x? a? -> SF (q + x?) y? b?) -> Eta (q + x? + y?) (a? -> b?)
-    --  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    --                  f
-    --
-    -- ! eta constructed with 'lam' !
-    -- lam :: (Beta q' a' -> Eta q' b') -> Eta q' (a' -> b')
-    -- 
-    -- ==> new goal: sugar f so that it fits arg. of 'lam'.
-    -- Beta 'None a? -> Eta (q + x? + y?) b?
-    --  ^^^^^^^^^^^
-    --      ast
-    -- =>
-    -- 1 : smartBeta ast  :: SF None x? a?
-    -- 2 : f 2            :: SF (q + x?) y? b?
-    -- 3 : smartEta 3     :: Eta (q + x? + y?) b?
-    -- =>
-    -- 4 : lam (\ast . 3) :: Eta (q + x? + y?) (a? -> b?)
-    --
-    -- ! not accounted for: assoc of + and flattening of x? & y? !
-    -- 3    :: Eta (U (U q (F x?)) (F y?)) _
-    -- goal :: Eta (U q (U (F x?) (F y?))) _
-    -- =>
-    -- 1 : F a ~ a
-    -- 2 : (U (U a b) c) ~ (U a (U b c))
-    --
+        lam (\(v :: Beta sym 'None v) -> smartEta y (union' q fx) b $ f $ smartBeta x a v)
     smartEta (ExtZ Refl (p :: Proxy x) (y :: ExtRep y)) q (SigPred p' (b :: SigRep b)) f | Just Refl <- eqP p p' =
-        --withDict notin $
         elam (\(e :: Ev x) -> smartEta y (QualPred p q) b (f e))
-      where
-        --fun :: Ev x -> Eta sym (Union (x ':. q) (Flat y)) b
-        --fun e | Just Refl <- eqP p p' = smartEta y (QualPred p q) b (f e)
-        --notin :: Remove x (Flat y) :~: (Flat y)
-        --notin = undefined
-    -- SF q e a -> Eta (q + e) a
-    --   > a ~ (p? => b?), e ~ (Z p? y?)
-    -- SF q (Z p? y?) (p? => b?) -> Eta (q + (Z p? y?)) (p? => b?)
-    --   > (Z p? y?) ~ y?, expand SF def.
-    -- (Ev p? -> SF (p? : q) y? b?) -> Eta (q + y?) (p? => b?)
-    --  ^^^^^^^^^^^^^^^^^^^^^^^^^^
-    --              f
-    --
-    -- ! eta constructed with 'elam' !
-    -- elam :: (Ev p' -> Eta (p' : q') b') -> Eta ((p' : q') - p') (p' => b')
-    --
-    -- ==> new goal: sugar f so that it fits arg. of 'elam'.
-    -- Ev p? -> Eta (p? : q + y?) b?
-    --  ^^^
-    --   e
-    -- =>
-    -- 1 : f e           :: SF (p? : q) y? b?
-    -- 2 : smartEta 1    :: Eta (p? : q + y?) b?
-    -- =>
-    -- 3 : elam (\e . 2) :: Eta ((p? : q + y?) - p?) (p? => b?)
-    --                    ~ Eta (q + y?) (p? => b?)
-    --
     smartEta _ _ _ _ = error "What?!"
 
 --------------------------------------------------------------------------------
