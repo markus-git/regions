@@ -16,8 +16,9 @@ module Language.Diorite.Signatures
     -- * Qualifiers.
     , Qualifier(..)
     , Insert
-    , Union
     , Remove
+    , Union
+    , Difference
     , QualRep(..)
     , Qual(..)
     -- ** ...
@@ -179,6 +180,12 @@ type Union :: forall p . Qualifier p -> Qualifier p -> Qualifier p
 type family Union ps qs where
     Union ('None)    qs = qs
     Union (p ':. ps) qs = p ':. Union ps (Remove p qs)
+
+-- | ...
+type Difference :: forall p . Qualifier p -> Qualifier p -> Qualifier p
+type family Difference ps qs where
+  Difference ps ('None)    = ps
+  Difference ps (q ':. qs) = Difference (Remove q ps) qs
 
 --------------------------------------------------------------------------------
 -- ** Rep. of a valid qualifier.
