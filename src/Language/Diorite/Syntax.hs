@@ -1,10 +1,11 @@
 {-# OPTIONS_GHC -Wall #-}
-{-# OPTIONS_GHC -fprint-explicit-foralls #-}
+--{-# OPTIONS_GHC -fprint-explicit-foralls #-}
+--{-# OPTIONS_GHC -fprint-explicit-kinds #-}
 
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE UndecidableInstances #-} -- hmm..
+{-# LANGUAGE UndecidableInstances #-}
 
 module Language.Diorite.Syntax
     (
@@ -21,8 +22,7 @@ module Language.Diorite.Syntax
     -- * "Smart" constructors.
     , SmartBeta
     , SmartSig
-    , SmartQual
-    , SmartExt
+    , SmartEx
     , SmartSym
     , smartSym'
     -- * Open symbol domains.
@@ -30,10 +30,10 @@ module Language.Diorite.Syntax
     , (:+:)(..)
     , Project(..)
     , (:<:)(..)
---  , smartSym
+    , smartSym
     -- * Utilities.
-    , Ex(..)
-    , liftE
+--  , Ex(..)
+--  , liftE
     ) where
 
 -- Related stuff:
@@ -56,7 +56,8 @@ type Name = Int
 newtype Ev q = Ev Name
 
 -- | Generic abstract syntax tree with beta-eta long normal form.
-data Beta sym (qs :: Qualifier p) (sig :: Signature p *) where
+type Beta :: forall p . (Signature p * -> *) -> Qualifier p -> Signature p * -> *
+data Beta sym qs sig where
     -- ^ Variable.
     Var   :: Sig sig => Name -> Beta sym qs sig
     -- ^ Symbol.
@@ -66,7 +67,8 @@ data Beta sym (qs :: Qualifier p) (sig :: Signature p *) where
     -- ^ Evidence-application.
     (:#)  :: Beta sym qs (q ':=> sig) -> Ev q -> Beta sym (q ':. qs) sig
 
-data Eta sym (qs :: Qualifier p) (sig :: Signature p *) where
+type Eta :: forall p . (Signature p * -> *) -> Qualifier p -> Signature p * -> *
+data Eta sym qs sig where
     -- ^ Body.
     Spine :: Beta sym qs ('Const a) -> Eta sym qs ('Const a)
     -- ^ Abstraction.
@@ -131,31 +133,29 @@ elam f = Ev v :\\ body
 -- ** "Smart" constructors.
 
 -- | Map a symbol to its corresponding "smart" constructor.
-type family SmartBeta (sym :: Signature p * -> *) (qs :: Qualifier p) (ex :: Ext p) (sig :: Signature p *) where
-    SmartBeta sym qs ('X)       ('Const a) = Beta sym qs ('Const a)
-    SmartBeta sym qs ('Y ps rs) (a ':-> b) = SmartBeta sym 'None ps a -> SmartBeta sym (Union qs (Flat ps)) rs b
-    SmartBeta sym qs ('Z q rs)  (q ':=> b) = Ev q -> SmartBeta sym (q ':. qs) rs b
+type SmartBeta :: forall p . (Signature p * -> *) -> Qualifier p -> Exists p -> Signature p * -> *
+type family SmartBeta sym qs ex sig where
+    SmartBeta sym qs ('Empty)    ('Const a) = Beta sym qs ('Const a)
+    SmartBeta sym qs (ps ':- rs) (a ':-> b) = SmartBeta sym 'None ps a -> SmartBeta sym (Union qs (SmartQual ps)) rs b
+    SmartBeta sym qs (q  ':= rs) (q ':=> b) = Ev q -> SmartBeta sym (q ':. qs) rs b
 
 -- | Reconstruct a symbol's signature.
-type family SmartSig f :: Signature p * where
+type SmartSig :: forall p . * -> Signature p *
+type family SmartSig f where
     SmartSig (AST _ _ a) = a
     SmartSig (Ev q -> f) = q ':=> SmartSig f
     SmartSig (a -> f)    = SmartSig a ':-> SmartSig f
 
--- | Feth the qualifiers of a "smart" constructor.
-type family SmartQual f :: Qualifier p where
-    SmartQual (AST _ q _) = q
-    SmartQual (Ev _ -> f) = SmartQual f
-    SmartQual (_ -> f)    = SmartQual f
-
 -- | ...
-type family SmartExt f :: Ext p where
-    SmartExt (AST _ _ _) = 'X
-    SmartExt (Ev p -> f) = 'Z p (SmartExt f)
-    SmartExt (a -> f)    = 'Y (SmartExt a) (SmartExt f)
+type SmartEx :: forall p . * -> Exists p
+type family SmartEx f where
+    SmartEx (AST _ _ _) = 'Empty
+    SmartEx (Ev p -> f) = p ':= (SmartEx f)
+    SmartEx (a -> f)    = (SmartEx a) ':- (SmartEx f)
 
 -- | Fetch the symbol of a "smart" constructor.
-type family SmartSym f :: Signature p * -> * where
+type SmartSym :: forall p . * -> (Signature p * -> *)
+type family SmartSym f where
     SmartSym (AST s _ _) = s
     SmartSym (Ev _ -> f) = SmartSym f
     SmartSym (_ -> f)    = SmartSym f
@@ -163,35 +163,36 @@ type family SmartSym f :: Signature p * -> * where
 --------------------------------------------------------------------------------
 
 -- | Make a "smart" constructor for a symbol.
-smartSym' :: forall (ex :: Ext p) sym (sig :: Signature p *) f
+smartSym' :: forall p (es :: Exists p) sym (sig :: Signature p *) f
     .  ( Sig sig
-       , f   ~ SmartBeta sym 'None ex sig
-       , ex  ~ SmartExt f
+       , Ex es
+       , f   ~ SmartBeta sym 'None es sig
+       , es  ~ SmartEx  f
        , sig ~ SmartSig f
        , sym ~ SmartSym f
        )
-    => ExtRep ex -> sym sig -> f
-smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
+    => sym sig -> f
+smartSym' sym = smartBeta (record :: ExRep es) (signature :: SigRep sig) (Sym sym)
   where
-    smartBeta :: forall e q a . ExtRep e -> SigRep a -> Beta sym q a -> SmartBeta sym q e a
-    smartBeta (ExtX) (SigConst) ast = ast
-    smartBeta (ExtY x y) (SigPart a b) ast =
+    smartBeta :: forall e q a . ExRep e -> SigRep a -> Beta sym q a -> SmartBeta sym q e a
+    smartBeta (ExEmpty) (SigConst) ast = ast
+    smartBeta (ExUnion x y) (SigPart a b) ast =
         \f -> smartBeta y b (ast :$ smartEta x QualNone a f)
-    smartBeta (ExtZ _ p y) (SigPred p' b) ast | Just Refl <- eqP p p' =
+    smartBeta (ExPred _ p y) (SigPred p' b) ast | Just Refl <- eqP p p' =
         \e -> smartBeta y b (ast :# e)
     smartBeta _ _ _ = error "What?!"
 
-    smartEta :: forall e q a . ExtRep e -> QualRep q -> SigRep a -> SmartBeta sym q e a -> Eta sym (Union q (Flat e)) a
-    smartEta (ExtX) q (SigConst) f =
+    smartEta :: forall e q a . ExRep e -> QualRep q -> SigRep a -> SmartBeta sym q e a -> Eta sym (Union q (SmartQual e)) a
+    smartEta (ExEmpty) q (SigConst) f =
         withDict (witUniIdent q) $
         Spine f
-    smartEta (ExtY (x :: ExtRep x) (y :: ExtRep y)) q (SigPart a b) f =
-        let fx = flatten' x in
-        let fy = flatten' y in
+    smartEta (ExUnion (x :: ExRep x) (y :: ExRep y)) q (SigPart a b) f =
+        let fx = smartQual x in
+        let fy = smartQual y in
         withDict (witSig a) $
         withDict (witUniAssoc q fx fy) $
         lam (\(v :: Beta sym 'None v) -> smartEta y (union' q fx) b $ f $ smartBeta x a v)
-    smartEta (ExtZ Refl (p :: Proxy x) (y :: ExtRep y)) q (SigPred p' (b :: SigRep b)) f | Just Refl <- eqP p p' =
+    smartEta (ExPred Refl (p :: Proxy x) (y :: ExRep y)) q (SigPred p' (b :: SigRep b)) f | Just Refl <- eqP p p' =
         elam (\(e :: Ev x) -> smartEta y (QualPred p q) b (f e))
     smartEta _ _ _ _ = error "What?!"
 
@@ -256,28 +257,30 @@ instance {-# OVERLAPS #-} (sym1 :<: sym3) => (sym1 :<: (sym2 :+: sym3)) where
     inj = InjR . inj
 
 --------------------------------------------------------------------------------
-{-
+
 -- | Make a "smart" constructor for a symbol.
-smartSym :: forall p sup sub (sig :: Signature p *) f
+smartSym :: forall p (es :: Exists p) sup sub (sig :: Signature p *) f
     .  ( Sig sig
-       , f   ~ SmartBeta sup sig
+       , Ex es
+       , f   ~ SmartBeta sup 'None es sig
+       , es  ~ SmartEx  f
        , sig ~ SmartSig f
        , sup ~ SmartSym f
        , sub :<: sup
        )
     => sub sig -> f
 smartSym = smartSym' . inj
--}
+
 --------------------------------------------------------------------------------
 -- ** Utils.
 --------------------------------------------------------------------------------
 
--- | Existential quantification.
-data Ex e where
-    Ex :: e a -> Ex e
+-- -- | Existential quantification.
+-- data Ex e where
+--     Ex :: e a -> Ex e
 
-liftE :: (forall a . e a -> b) -> Ex e -> b
-liftE f (Ex a) = f a
+-- liftE :: (forall a . e a -> b) -> Ex e -> b
+-- liftE f (Ex a) = f a
 
 --------------------------------------------------------------------------------
 -- Fin.

@@ -2,10 +2,9 @@
 
 module SmartSym where
 
-import Language.Diorite.Signatures (Signature(..), Qualifier(..))
+import Language.Diorite.Signatures
 import Language.Diorite.Syntax
 import Language.Diorite.Interpretation
-import qualified Language.Diorite.Signatures as E
 
 --------------------------------------------------------------------------------
 -- * 'smartSym' translations without qualifiers.
@@ -30,15 +29,15 @@ type B  a = B' ('Const a)
 
 x, xs :: B Int -> (B Int -> B Int) -> B Int
 x  = \a -> \f -> Sym X :$ Spine a :$ (lam (\v -> Spine (f v)))
-xs = smartSym' E.ext X
+xs = smartSym' X
 
 y, ys :: ((B Int -> B Int) -> B Int) -> B Int
 y  = \f -> Sym Y :$ lam (\(v :: B' ('Const Int ':-> 'Const Int)) -> Spine (f (\b -> v :$ (Spine b))))
-ys = smartSym' E.ext Y
+ys = smartSym' Y
 
 z, zs :: (B Int -> (B Int -> B Int)) -> B Int
 z  = \f -> Sym Z :$ lam (\b1 -> (lam (\b2 -> Spine (f b1 b2))))
-zs = smartSym' E.ext Z
+zs = smartSym' Z
 
 --------------------------------------------------------------------------------
 

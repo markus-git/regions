@@ -1,11 +1,13 @@
 module Language.Diorite
-    ( module Language.Diorite.Syntax
+    ( module Language.Diorite.Signature
+    , module Language.Diorite.Syntax
     , module Language.Diorite.Sugar
     , module Language.Diorite.Interpretation
     , module Language.Diorite.Decoration
     , module Language.Diorite.Traversal
     ) where
 
+import Language.Diorite.Signature
 import Language.Diorite.Syntax
 import Language.Diorite.Sugar
 import Language.Diorite.Interpretation

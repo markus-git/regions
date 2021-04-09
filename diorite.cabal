@@ -27,7 +27,7 @@ library
 --    Language.Diorite.Region
   -- other-modules:
   build-depends:
-    base >=4.11 && <4.12,
+    base >=4.11 && <4.15,
     constraints < 0.12,
     containers < 0.7,
     mtl >= 2 && < 2.3
@@ -39,6 +39,7 @@ library
     DataKinds
     PolyKinds
     KindSignatures
+    StandaloneKindSignatures
     TypeFamilies
     TypeOperators
     FlexibleInstances
