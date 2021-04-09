@@ -82,14 +82,15 @@ instance forall p (qs :: Qualifier p) a b .
         -- I (a->b) ~ I a :-> I b
       let x2 = x1 :: Beta @p (Domain @p a) (Context @p (a->b)) (Internal @p a ':-> Internal @p b) in
         -- > apply 'f' to 'a'.
-      let x3 = x2 :$ x0 :: Beta @p (Domain @p a) (Union (Context @p (a->b)) (Context @p a)) (Internal @p b) in
         -- D a ~ D b
-        -- C b ~ Union qs (C a)
-      let x4 = x3 :: Beta @p (Domain @p b) (Union qs (Context @p a)) (Internal @p b) in
+      let x3 = x2 :$ x0 :: Beta @p (Domain @p b) (Union (Context @p (a->b)) (Context @p a)) (Internal @p b) in
+        -- !!! hmm... how to get from 'x3' to 'x8'...
+        -- C b ~ Union (C (a->b)) (C a)
+      let x8 = undefined :: Beta @p (Domain @p b) (Context @p b) (Internal @p b) in
         -- > 'x4' types now fits sugaring to output 'b'.
-      let x5 = sugar x4 :: b in
+      let x9 = sugar x8 :: b in
         -- ...
-      x5
+      x9
     desugar f =
       lam (\a ->
           -- sugar 'a' into ast. arg.
@@ -97,16 +98,13 @@ instance forall p (qs :: Qualifier p) a b .
           -- apply 'f' to arg.
         let x1 = f x0 :: b in
           -- desugar and rewrite 'x1' into result.
-        let x2 = desugar x1 :: Eta @p (Domain @p b) (Context @p b) (Internal @p b) in
-          -- C b ~ Union qs (C a)
-        let x3 = x2 :: Eta @p (Domain @p b) (Union qs (Context @p a)) (Internal @p b) in
-          -- !!! hmm... how to get from 'x3' to 'x8'... or did I do something wrong?
-        let x8 = undefined :: Eta @p (Domain @p (a->b)) (Context @p (a->b)) (Internal @p b) in
-          -- D (a->b) ~ D a
-          -- C (a->b) ~ Diff (C b) (C a)
-        let x9 = x8 :: Eta @p (Domain @p a) qs (Internal @p b) in
+          -- D a ~ D b
+        let x2 = desugar x1 :: Eta @p (Domain @p a) (Context @p b) (Internal @p b) in
+          -- !!! hmm... how to get from 'x2' to 'x9'...
+          -- C b ~ C (a->b)
+        let x9 = undefined :: Eta @p (Domain @p a) (Context @p (a->b)) (Internal @p b) in
           -- ...
-        x9) :: Eta @p (Domain @p a) qs (Internal @p a ':-> Internal @p b)
+        x9)
 
 -- -- | Syntactic type casting.
 -- resugar ::
