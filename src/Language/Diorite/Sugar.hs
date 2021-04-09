@@ -86,7 +86,7 @@ instance forall p (qs :: Qualifier p) a b .
         -- D a ~ D b
         -- C b ~ Union qs (C a)
       let x4 = x3 :: Beta @p (Domain @p b) (Union qs (Context @p a)) (Internal @p b) in
-        -- ...
+        -- > 'x4' types now fits sugaring to output 'b'.
       let x5 = sugar x4 :: b in
         -- ...
       x5
@@ -100,11 +100,13 @@ instance forall p (qs :: Qualifier p) a b .
         let x2 = desugar x1 :: Eta @p (Domain @p b) (Context @p b) (Internal @p b) in
           -- C b ~ Union qs (C a)
         let x3 = x2 :: Eta @p (Domain @p b) (Union qs (Context @p a)) (Internal @p b) in
-          -- hmm... how to get from 'x3' to 'x8'... or did I do something wrong?
+          -- !!! hmm... how to get from 'x3' to 'x8'... or did I do something wrong?
         let x8 = undefined :: Eta @p (Domain @p (a->b)) (Context @p (a->b)) (Internal @p b) in
           -- D (a->b) ~ D a
+          -- C (a->b) ~ Diff (C b) (C a)
         let x9 = x8 :: Eta @p (Domain @p a) qs (Internal @p b) in
-        x9)
+          -- ...
+        x9) :: Eta @p (Domain @p a) qs (Internal @p a ':-> Internal @p b)
 
 -- -- | Syntactic type casting.
 -- resugar ::
