@@ -12,17 +12,17 @@ module Language.Diorite.Sugar
     (
     -- * Syntactic sugaring.
       Syntactic(..)
-    -- , resugar
-    -- , sugarSym
+    , resugar
+    , sugarSym
     ) where
 
 -- Related stuff:
 --   https://emilaxelsson.github.io/documents/axelsson2013using.pdf
 
-import Language.Diorite.Signatures (Signature(..), Sig, Qualifier(..), Union, Difference)
+import Language.Diorite.Signatures (Signature(..), Sig, Qualifier(..), QualRep, Qual(..), witUniIdent)
 import Language.Diorite.Syntax (Beta(..), Eta(..), lam)
 
-import Data.Constraint (Constraint)
+import Data.Constraint (Constraint, withDict)
 --import Data.Kind
 
 --------------------------------------------------------------------------------
@@ -55,65 +55,44 @@ instance Syntactic (Eta @p sym qs ('Const a)) where
     sugar   = Spine
     desugar = id
 
--- (qs :: Qualifier p)
-instance forall p a b .
+instance
     ( Syntactic a
     , Syntactic b
-    , p ~ Pred b
     , Pred a ~ Pred b
-    , Domain @p a ~ Domain @p b
---    , Context @p b ~ Union qs (Context @p a)
---    , qs ~ Difference (Context @p b) (Context @p a)
-    , Sig (Internal @p a)
+    , Domain  @(Pred a) a ~ Domain @(Pred a) b
+    , Context @(Pred a) a ~ 'None
+    , Sig  (Internal @(Pred a) a)
+    , Qual (Context  @(Pred a) b)
     )
     => Syntactic (a -> b)
   where
-    type Pred     (a -> b) = Pred b   -- Pred b ~ Pred a
-    type Domain   (a -> b) = Domain b -- Domain b ~ Domain a
+    type Pred     (a -> b) = Pred b
+    type Domain   (a -> b) = Domain b
     type Context  (a -> b) = Context b
     type Internal (a -> b) = Internal a ':-> Internal b
-    -- (:$) :: Beta s qs (a->b) -> Eta s ps a -> Beta s (Union qs ps) b
-    sugar f = \a ->
-      let a0 = a          :: a in
-      let a1 = desugar a0 :: Eta  @p (Domain a)      (Context a)      (Internal a) in
-      let f0 = f          :: Beta @p (Domain (a->b)) (Context (a->b)) (Internal (a->b)) in
-      let f1 = f0         :: Beta @p (Domain a)      (Context (a->b)) (Internal a ':-> Internal b) in
-      -- f1 > Domain   (a->b) ~ Domain a
-      --    > Internal (a->b) ~ Internal a -> Internal b
-      let b0 = f1 :$ a1   :: Beta @p (Domain a) (Union (Context (a->b)) (Context a)) (Internal b) in
-      -- b0 > Context b ~ Union (Context (a->b)) (Context a)
-      let res = sugar (undefined :: Beta @p (Domain b) (Context b) (Internal b)) :: b in
-      res
-    desugar f =
-      -- lam :: (Beta s ps a -> Eta s qs b) -> Eta s qs (a->b)
-      lam (\a ->
-        let a0 = a          :: Beta @p (Domain a) (Context a) (Internal a) in
-        let a1 = sugar a0   :: a in
-        let f0 = f          :: a -> b in
-        let b0 = f0 a1      :: b in
-        let b1 = desugar b0 :: Eta @p (Domain b) (Context b) (Internal b) in
-        -- b1 > Context b ~ Context (a->b)
-        let res = undefined :: Eta @p (Domain b) (Context (a->b)) (Internal b) in
-        res)
-    -- sugar f   = sugar . (f :$) . desugar
-    -- desugar f = lam (desugar . f . sugar)
+    sugar f = withDict wit sugar . (f :$) . desugar
+        where wit = witUniIdent (qualifier :: QualRep (Context @(Pred a) b))
+    desugar f = lam (desugar . f . sugar)
 
--- -- | Syntactic type casting.
--- resugar ::
---     ( Syntactic a
---     , Syntactic b
---     , Domain a ~ Domain b
---     , Internal a ~ Internal b
---     )
---     => a -> b
--- resugar = sugar . tail' . desugar
---   where
---     tail' :: Eta (Domain a) 'None ('Const a) -> Beta (Domain a) 'None ('Const a)
---     tail' (Spine b) = b
+-- | Syntactic type casting.
+resugar :: forall a b c.
+    ( Syntactic a
+    , Syntactic b
+    , Pred a ~ Pred b
+    , Domain   @(Pred a) a ~ Domain   @(Pred a) b
+    , Internal @(Pred a) a ~ Internal @(Pred a) b
+    , Context  @(Pred a) a ~ Context  @(Pred a) b
+    , Internal @(Pred a) a ~ 'Const c
+    )
+    => a -> b
+resugar = sugar . tail' . desugar
+  where
+    tail' :: Eta @p (Domain a) (Context a) ('Const c) -> Beta @p (Domain a) (Context a) ('Const c)
+    tail' (Spine b) = b
 
 -- | Sugared symbol application.
--- sugarSym :: (Syntactic p a, (Context a :: Qualifier p) ~ 'None) => (Domain a :: Signature p * -> *) (Internal a :: Signature p *) -> a
--- sugarSym = sugar . Sym
+sugarSym :: (Syntactic a, Context @(Pred a) a ~ 'None) => (Domain a) (Internal @(Pred a) a) -> a
+sugarSym = sugar . Sym
 
 --------------------------------------------------------------------------------
 -- Fin.

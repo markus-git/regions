@@ -17,10 +17,10 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:
---    Language.Diorite
+    Language.Diorite
     Language.Diorite.Syntax
     Language.Diorite.Signatures
---    Language.Diorite.Sugar
+    Language.Diorite.Sugar
 --    Language.Diorite.Interpretation
 --    Language.Diorite.Decoration
 --    Language.Diorite.Traversal

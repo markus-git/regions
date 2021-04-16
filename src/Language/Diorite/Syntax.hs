@@ -103,7 +103,7 @@ maxNameEta (Spine b) = maxNameBeta b
     maxNameBeta _             = 0
 
 -- | Interface for variable binding.
-lam :: Sig a => (Beta sym ps a -> Eta sym qs b) -> Eta sym qs (a ':-> b)
+lam :: Sig a => (Beta sym 'None a -> Eta sym qs b) -> Eta sym qs (a ':-> b)
 lam f = v :\ body
   where
     v    = maxNameEta body + 1
