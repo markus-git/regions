@@ -36,8 +36,8 @@ class Syntactic a where
     type Domain a   :: Signature p * -> *
     type Context a  :: Qualifier p
     type Internal a :: Signature p *
-    sugar   :: forall p . Pred a ~ p => Beta @p (Domain @p a) (Context @p a) (Internal @p a) -> a
-    desugar :: forall p . Pred a ~ p => a -> Eta @p (Domain @p a) (Context @p a) (Internal @p a)
+    sugar   :: Pred a ~ p => Beta @p (Domain @p a) (Context @p a) (Internal @p a) -> a
+    desugar :: Pred a ~ p => a -> Eta @p (Domain @p a) (Context @p a) (Internal @p a)
 
 instance Syntactic (Beta @p sym qs ('Const a)) where
     type Pred     (Beta sym qs ('Const a)) = p
@@ -55,56 +55,48 @@ instance Syntactic (Eta @p sym qs ('Const a)) where
     sugar   = Spine
     desugar = id
 
-instance forall p (qs :: Qualifier p) a b .
+-- (qs :: Qualifier p)
+instance forall p a b .
     ( Syntactic a
     , Syntactic b
     , p ~ Pred b
     , Pred a ~ Pred b
     , Domain @p a ~ Domain @p b
-    , Context @p b ~ Union qs (Context @p a)
-    , qs ~ Difference (Context @p b) (Context @p a)
+--    , Context @p b ~ Union qs (Context @p a)
+--    , qs ~ Difference (Context @p b) (Context @p a)
     , Sig (Internal @p a)
     )
     => Syntactic (a -> b)
   where
     type Pred     (a -> b) = Pred a
     type Domain   (a -> b) = Domain a
-    type Context  (a -> b) = Difference (Context @p b) (Context @p a)
+    type Context  (a -> b) = Context @p b --Difference (Context @p b) (Context @p a)
     type Internal (a -> b) = Internal a ':-> Internal b
     -- sugar f   = sugar . (f :$) . desugar
     -- desugar f = lam (desugar . f . sugar)
     sugar f = \a ->
-        -- > desugar 'a' into arg.
-      let x0 = desugar a :: Eta @p (Domain @p a) (Context @p a) (Internal @p a) in
-        -- > rewrite 'f' to fit 'a' arg.
-      let x1 = f :: Beta @p (Domain @p (a->b)) (Context @p (a->b)) (Internal @p (a->b)) in
-        -- D (a->b) ~ D a
-        -- I (a->b) ~ I a :-> I b
-      let x2 = x1 :: Beta @p (Domain @p a) (Context @p (a->b)) (Internal @p a ':-> Internal @p b) in
-        -- > apply 'f' to 'a'.
-        -- D a ~ D b
-      let x3 = x2 :$ x0 :: Beta @p (Domain @p b) (Union (Context @p (a->b)) (Context @p a)) (Internal @p b) in
-        -- !!! hmm... how to get from 'x3' to 'x8'...
-        -- C b ~ Union (C (a->b)) (C a)
-      let x8 = undefined :: Beta @p (Domain @p b) (Context @p b) (Internal @p b) in
-        -- > 'x4' types now fits sugaring to output 'b'.
-      let x9 = sugar x8 :: b in
-        -- ...
-      x9
+      let a0 = a :: a in
+      let f0 = f :: Beta @p (Domain @p (a->b)) (Context @p (a->b)) (Internal @p (a->b)) in
+      -- (:$) :: Beta s qs (a->b) -> Eta s ps a -> Beta s (Union qs ps) b
+      let f1 = f0 :: Beta @p (Domain @p a) (Context @p (a->b)) (Internal @p a ':-> Internal @p b) in
+      -- f1 > Domain   (a->b) ~ Domain a
+      --    > Internal (a->b) ~ Internal a -> Internal b
+      let a1 = desugar a0 :: Eta @p (Domain @p a) (Context @p a) (Internal @p a) in
+      let b0 = f1 :$ a1   :: Beta @p (Domain @p a) (Union (Context @p (a->b)) (Context @p a)) (Internal @p b) in
+      -- ?? > Context b ~ Union (Context (a->b)) (Context a)
+      let res = sugar (undefined :: Beta @p (Domain @p b) (Context @p b) (Internal @p b)) :: b in
+      res
     desugar f =
       lam (\a ->
-          -- sugar 'a' into ast. arg.
-        let x0 = sugar a :: a in
-          -- apply 'f' to arg.
-        let x1 = f x0 :: b in
-          -- desugar and rewrite 'x1' into result.
-          -- D a ~ D b
-        let x2 = desugar x1 :: Eta @p (Domain @p a) (Context @p b) (Internal @p b) in
-          -- !!! hmm... how to get from 'x2' to 'x9'...
-          -- C b ~ C (a->b)
-        let x9 = undefined :: Eta @p (Domain @p a) (Context @p (a->b)) (Internal @p b) in
-          -- ...
-        x9)
+        let a0 = a :: Beta @p (Domain @p a) (Context @p a) (Internal @p a) in
+        let f0 = f :: a -> b in
+        -- lam :: (Beta s ps a -> Eta s qs b) -> Eta s qs (a->b)
+        let a1 = sugar a0   :: a in
+        let b0 = f0 a1      :: b in
+        let b1 = desugar b0 :: Eta @p (Domain @p b) (Context @p b) (Internal @p b) in
+        -- ?? > Context b ~ Context (a->b)
+        let res = undefined :: Eta @p (Domain @p b) (Context @p (a->b)) (Internal @p b) in
+        res)
 
 -- -- | Syntactic type casting.
 -- resugar ::
