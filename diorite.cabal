@@ -22,7 +22,7 @@ library
     Language.Diorite.Signatures
     Language.Diorite.Sugar
 --    Language.Diorite.Interpretation
---    Language.Diorite.Decoration
+    Language.Diorite.Decoration
 --    Language.Diorite.Traversal
 --    Language.Diorite.Region
   -- other-modules:
