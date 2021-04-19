@@ -2,9 +2,7 @@
 
 module SmartSym where
 
-import Language.Diorite.Signatures
-import Language.Diorite.Syntax
-import Language.Diorite.Interpretation
+import Language.Diorite
 
 --------------------------------------------------------------------------------
 -- * 'smartSym' translations without qualifiers.

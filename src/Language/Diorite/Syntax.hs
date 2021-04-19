@@ -40,9 +40,11 @@ module Language.Diorite.Syntax
 --   https://emilaxelsson.github.io/documents/axelsson2012generic.pdf
 
 import Language.Diorite.Signatures
+import Language.Diorite.Qualifiers
 
 import Data.Constraint (withDict)
 import Data.Proxy (Proxy(..))
+import Data.Typeable (Typeable, eqT)
 import Data.Type.Equality ((:~:)(..))
 
 --------------------------------------------------------------------------------
@@ -83,7 +85,7 @@ infixr 9 :\, :\\
 type AST sym qs sig = Beta sym qs sig
 
 -- | Fully applied AST (constant value).
-type ASTF sym qs sig = Beta sym qs ('Const sig)
+type ASTF sym qs a = Beta sym qs ('Const a)
 
 -- | Symbol with a valid signature.
 class Sym sym where
@@ -191,7 +193,7 @@ smartSym' sym = smartBeta (record :: ExRep es) (signature :: SigRep sig) (Sym sy
         let fy = smartQual y in
         withDict (witSig a) $
         withDict (witUniAssoc q fx fy) $
-        lam (\(v :: Beta sym 'None v) -> smartEta y (union' q fx) b $ f $ smartBeta x a v)
+        lam (\(v :: Beta sym 'None v) -> smartEta y (union q fx) b $ f $ smartBeta x a v)
     smartEta (ExPred Refl (p :: Proxy x) (y :: ExRep y)) q (SigPred p' (b :: SigRep b)) f | Just Refl <- eqP p p' =
         elam (\(e :: Ev x) -> smartEta y (QualPred p q) b (f e))
     smartEta _ _ _ _ = error "What?!"
@@ -281,6 +283,9 @@ smartSym = smartSym' . inj
 
 -- liftE :: (forall a . e a -> b) -> Ex e -> b
 -- liftE f (Ex a) = f a
+
+eqP :: (Typeable a, Typeable b) => Proxy a -> Proxy b -> Maybe (a :~: b)
+eqP _ _ = eqT
 
 --------------------------------------------------------------------------------
 -- Fin.

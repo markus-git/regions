@@ -7,28 +7,6 @@ module Language.Diorite.Region
 import Language.Diorite.Region.Annotation ()
 import Language.Diorite.Region.Monad ()
 
---import Language.Diorite.Syntax
---import Language.Diorite.Decoration ((:&:)(..))
---import Language.Diorite.Interpretation (Render(..))
---import Language.Diorite.Traversal (Args(..), constMatch)
---import qualified Language.Diorite.Syntax as S
---import qualified Language.Diorite.Decoration as S
-
-{-
-import Data.Maybe (fromJust)
-import Data.Constraint (Dict(..), withDict)
-import Data.Type.Equality ((:~:)(..), TestEquality(..))
-import Data.Typeable (Typeable, eqT)
-import qualified Data.List as L (partition)
-
-import Control.Monad.State (State)
-import qualified Control.Monad.State as S (get, put, evalState)
-
-import Prelude hiding (lookup)
-import qualified Prelude as P (lookup)
--}
-
-
 --------------------------------------------------------------------------------
 -- * ...
 --------------------------------------------------------------------------------
@@ -38,18 +16,24 @@ import qualified Prelude as P (lookup)
 --------------------------------------------------------------------------------
 -- Fin.
 
+--import Language.Diorite.Syntax
+--import Language.Diorite.Decoration ((:&:)(..))
+--import Language.Diorite.Interpretation (Render(..))
+--import Language.Diorite.Traversal (Args(..), constMatch)
+--import qualified Language.Diorite.Syntax as S
+--import qualified Language.Diorite.Decoration as S
 
+-- import Data.Maybe (fromJust)
+-- import Data.Constraint (Dict(..), withDict)
+-- import Data.Type.Equality ((:~:)(..), TestEquality(..))
+-- import Data.Typeable (Typeable, eqT)
+-- import qualified Data.List as L (partition)
 
+-- import Control.Monad.State (State)
+-- import qualified Control.Monad.State as S (get, put, evalState)
 
-
-
-
-
-
-
-
-
-
+-- import Prelude hiding (lookup)
+-- import qualified Prelude as P (lookup)
 
 {-
 -- | ...

@@ -6,21 +6,18 @@ module Language.Diorite.Region.Annotation
       Put(..)
     , Annotation(..)
     , Strip
-    , Erasure
     , (:~~:)(..)
     -- ** ...
     , AnnRep(..)
     , Ann(..)
-    , strip
-    , erase
+    , strip'
+    -- **
     , testAnn
-    -- * ...
-    , Rgn(..)
-    , local
     ) where
 
-import Language.Diorite.Syntax (Signature, SigRep, Qual, (:-), Minus, Beta)
-import qualified Language.Diorite.Syntax as S
+import Language.Diorite.Signatures
+    (Signature, Erasure, SigRep(..), erase', testSig)
+import qualified Language.Diorite.Signatures as S (Signature(..))
 
 import Data.Type.Equality ((:~:)(..))
 import Data.Typeable (Typeable)
@@ -43,95 +40,63 @@ data Annotation r a =
 infixr 2 :->, :=>
 infixl 1 :^
 
--- | ...
+-- | The original symbol's signature is found after stripping its annotations.
 type family Strip (ann :: Annotation * *) :: Signature (Put *) * where
     Strip ('Const a) = 'S.Const a
     Strip (a ':-> b) = Strip a 'S.:-> Strip b
     Strip (p ':=> a) = p 'S.:=> Strip a
     Strip (a ':^ _)  = Strip a
 
--- | ...
-type family Erasure (sig :: S.Signature (Put *) *) :: Signature (Put *) * where
-    Erasure ('S.Const a) = 'S.Const a
-    Erasure (a 'S.:-> b) = Erasure a 'S.:-> Erasure b
-    Erasure (_ 'S.:=> a) = Erasure a
-
--- | Witness of equality under "Erasure".
+-- | Witness of equality between a symbol's signature and its erased annotation.
 newtype sig :~~: ann = Erased (sig :~: Erasure (Strip ann))
 
 infixr :~~:
 
 --------------------------------------------------------------------------------
 -- ** ...
-  
--- | ...
-data AnnRep (ann :: Annotation * *) where
-    AnnConst :: Typeable a => AnnRep ('Const a)
-    AnnPart  :: AnnRep a -> AnnRep ann -> AnnRep (a ':-> ann)
-    AnnPred  :: Typeable r => Proxy ('Put r) -> AnnRep ann -> AnnRep ('Put r ':=> ann)
-    AnnAt    :: AnnRep ann -> AnnRep (ann ':^ r)
 
--- | ...
-class Ann (ann :: Annotation * *) where
+type AnnRep :: Annotation * * -> *
+data AnnRep ann where
+    AnnConst :: Typeable a => AnnRep ('Const a)
+    AnnPart  :: AnnRep a -> AnnRep sig -> AnnRep (a ':-> sig)
+    AnnPred  :: Typeable r => Proxy ('Put r) -> AnnRep sig -> AnnRep ('Put r ':=> sig)
+    AnnAt    :: AnnRep sig -> AnnRep (sig ':^ r)
+
+class Ann ann where
     annotation :: AnnRep ann
 
 instance Typeable a => Ann ('Const a) where
     annotation = AnnConst
 
-instance (Ann a, Ann ann) => Ann (a ':-> ann) where
+instance (Ann a, Ann sig) => Ann (a ':-> sig) where
     annotation = AnnPart annotation annotation
 
-instance (Typeable r, Ann ann) => Ann ('Put r ':=> ann) where
+instance (Typeable r, Ann sig) => Ann ('Put r ':=> sig) where
     annotation = AnnPred Proxy annotation
 
-instance Ann ann => Ann (ann ':^ r) where
+instance Ann sig => Ann (sig ':^ r) where
     annotation = AnnAt annotation
 
--- | ...
-strip :: AnnRep ann -> SigRep (Strip ann)
-strip (AnnConst)    = S.SigConst
-strip (AnnPart a b) = S.SigPart (strip a) (strip b)
-strip (AnnPred p a) = S.SigPred p (strip a)
-strip (AnnAt a)     = strip a
+--------------------------------------------------------------------------------
+-- ** Implementation of ...
 
--- | ...
-erase :: S.SigRep sig -> SigRep (Erasure sig)
-erase (S.SigConst)    = S.SigConst
-erase (S.SigPart a b) = S.SigPart (erase a) (erase b)
-erase (S.SigPred _ a) = erase a
+strip' :: AnnRep ann -> SigRep (Strip ann)
+strip' (AnnConst)    = SigConst
+strip' (AnnPart a b) = SigPart (strip' a) (strip' b)
+strip' (AnnPred p a) = SigPred p (strip' a)
+strip' (AnnAt a)     = strip' a
 
--- | ...
+--------------------------------------------------------------------------------
+-- ** ...
+
 testAnn :: SigRep a -> AnnRep b -> Maybe (a :~~: b)
-testAnn sig ann | Just Refl <- S.testSig sig (erase (strip ann)) = Just (Erased Refl)
+testAnn sig ann | Just Refl <- testSig sig (erase' (strip' ann)) = Just (Erased Refl)
 testAnn _ _ = Nothing
 
-{- note: 'Erasure' being a type family seems to prevent a 'HasDict' instance.
-(|~) :: Maybe (a :~~: b) -> (a ~ Erasure b => Maybe c) -> Maybe c
-(|~) m a = do (Erased Refl) <- m;  a
-infixr |~
--}
-
---------------------------------------------------------------------------------
--- * ...
---------------------------------------------------------------------------------
-
-data Rgn a where
-    Local :: Rgn (('Put r 'S.:=> a) 'S.:-> a) -- Matched by ev. abs.
-    At    :: Rgn (a 'S.:-> a)                 -- Only effect is in ann. type?
-
--- | ...
-local :: forall sym qs r a . (Qual qs, qs :- 'Put r, Rgn S.:<: sym)
-    => Proxy r
-    -> Beta sym qs ('S.Const a)
-    -> Beta sym (Minus qs ('Put r)) ('S.Const a)
-local Proxy beta = lsym S.:$ S.elam (const (S.Spine beta))
-  where
-    lsym :: Beta sym 'S.None (('Put r 'S.:=> 'S.Const a) 'S.:-> 'S.Const a)
-    lsym = S.inj Local
-
--- | ...
-at :: Beta sym qs a
-at = undefined
+-- note: 'Erasure' being a type family seems to prevent a 'HasDict' instance.
+-- (|~) :: Maybe (a :~~: b) -> (a ~ Erasure b => Maybe c) -> Maybe c
+-- (|~) m a = do (Erased Refl) <- m;  a
+-- infixr |~
 
 --------------------------------------------------------------------------------
 -- Fin.

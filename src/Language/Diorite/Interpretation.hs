@@ -13,6 +13,7 @@ module Language.Diorite.Interpretation
 import Language.Diorite.Signatures (Signature(..))
 import Language.Diorite.Syntax (Ev(..), Beta(..), Eta(..), (:+:)(..))
 
+import Data.Constraint (Constraint)
 import qualified Control.Applicative as A
 
 --------------------------------------------------------------------------------
@@ -20,9 +21,10 @@ import qualified Control.Applicative as A
 --------------------------------------------------------------------------------
 
 -- | Render a symbol as concrete syntax.
+type Render :: forall sig . (sig -> *) -> Constraint
 class Render sym where
-    renderSym  :: sym sig -> String
-    renderArgs :: [String] -> sym sig -> String
+    renderSym  :: sym a -> String
+    renderArgs :: [String] -> sym a -> String
     renderArgs []   s = renderSym s
     renderArgs args s = "(" ++ unwords (renderSym s : args) ++ ")"
 
