@@ -321,8 +321,9 @@ witUniAssoc (QualPred (a :: Proxy q) (as :: QualRep qs)) b c =
     rhs = case witUniAssoc as (remove' a b) (remove' a c) of Refl -> Refl
 
 --------------------------------------------------------------------------------
--- * Since existential quantification isn't really a thing I have these.
+-- * Exists-stuff
 --
+-- Since existential quantification isn't really a thing I have these.
 -- Not sure this is the best way. Names are also a bit wierd.
 --------------------------------------------------------------------------------
 
