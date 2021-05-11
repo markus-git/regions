@@ -135,11 +135,16 @@ elam f = Ev v :\\ body
 -- ** "Smart" constructors.
 
 -- | Map a symbol to its corresponding "smart" constructor.
-type SmartBeta :: forall p . (Signature p * -> *) -> Qualifier p -> Exists p -> Signature p * -> *
+type SmartBeta :: forall p .
+    (Signature p * -> *) -> Qualifier p -> Exists p -> Signature p * -> *
 type family SmartBeta sym qs ex sig where
     SmartBeta sym qs ('Empty)    ('Const a) = Beta sym qs ('Const a)
-    SmartBeta sym qs (ps ':- rs) (a ':-> b) = SmartBeta sym 'None ps a -> SmartBeta sym (Union qs (SmartQual ps)) rs b
-    SmartBeta sym qs (q  ':= rs) (q ':=> b) = Ev q -> SmartBeta sym (q ':. qs) rs b
+    SmartBeta sym qs (ps ':- rs) (a ':-> b) =
+           SmartBeta sym 'None ps a
+        -> SmartBeta sym (Union qs (SmartQual ps)) rs b
+    SmartBeta sym qs (q  ':= rs) (q ':=> b) =
+           Ev q
+        -> SmartBeta sym (q ':. qs) rs b
 
 -- | Reconstruct a symbol's signature.
 type SmartSig :: forall p . * -> Signature p *
@@ -176,7 +181,11 @@ smartSym' :: forall p (es :: Exists p) sym (sig :: Signature p *) f
     => sym sig -> f
 smartSym' sym = smartBeta (record :: ExRep es) (signature :: SigRep sig) (Sym sym)
   where
-    smartBeta :: forall e q a . ExRep e -> SigRep a -> Beta sym q a -> SmartBeta sym q e a
+    smartBeta :: forall e q a .
+           ExRep e
+        -> SigRep a
+        -> Beta sym q a
+        -> SmartBeta sym q e a
     smartBeta (ExEmpty) (SigConst) ast = ast
     smartBeta (ExUnion x y) (SigPart a b) ast =
         \f -> smartBeta y b (ast :$ smartEta x QualNone a f)
@@ -184,7 +193,12 @@ smartSym' sym = smartBeta (record :: ExRep es) (signature :: SigRep sig) (Sym sy
         \e -> smartBeta y b (ast :# e)
     smartBeta _ _ _ = error "What?!"
 
-    smartEta :: forall e q a . ExRep e -> QualRep q -> SigRep a -> SmartBeta sym q e a -> Eta sym (Union q (SmartQual e)) a
+    smartEta :: forall e q a .
+           ExRep e
+        -> QualRep q
+        -> SigRep a
+        -> SmartBeta sym q e a
+        -> Eta sym (Union q (SmartQual e)) a
     smartEta (ExEmpty) q (SigConst) f =
         withDict (witUniIdent q) $
         Spine f
@@ -193,9 +207,11 @@ smartSym' sym = smartBeta (record :: ExRep es) (signature :: SigRep sig) (Sym sy
         let fy = smartQual y in
         withDict (witSig a) $
         withDict (witUniAssoc q fx fy) $
-        lam (\(v :: Beta sym 'None v) -> smartEta y (union q fx) b $ f $ smartBeta x a v)
-    smartEta (ExPred Refl (p :: Proxy x) (y :: ExRep y)) q (SigPred p' (b :: SigRep b)) f | Just Refl <- eqP p p' =
-        elam (\(e :: Ev x) -> smartEta y (QualPred p q) b (f e))
+        lam (\(v :: Beta sym 'None v) ->
+            smartEta y (union q fx) b $ f $ smartBeta x a v)
+    smartEta (ExPred Refl (p :: Proxy x) y) q (SigPred p' b) f
+      | Just Refl <- eqP p p'
+      = elam (\(e :: Ev x) -> smartEta y (QualPred p q) b (f e))
     smartEta _ _ _ _ = error "What?!"
 
 --------------------------------------------------------------------------------

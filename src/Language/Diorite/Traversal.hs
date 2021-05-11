@@ -48,6 +48,7 @@ match matchSym matchVar = flip matchBeta Nil
     matchBeta (Sym s)  as = matchSym s as
     matchBeta (b :$ e) as = matchBeta b (e :* as)
     matchBeta (b :# p) as = matchBeta b (p :~ as)
+-- todo: I'm sure matchVar needs to constrain 'ps' to be useful.
 
 -- | A version of 'match' with a simpler, constant result type.
 constMatch :: forall sym qs a b

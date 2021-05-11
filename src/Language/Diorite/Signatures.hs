@@ -11,6 +11,7 @@ module Language.Diorite.Signatures
     , SigRep(..)
     , Sig(..)
     -- ** ...
+    , result
     , erase
     -- ** ...
     , testSig
@@ -74,6 +75,11 @@ instance (Typeable p, Sig sig) => Sig (p ':=> sig) where
 
 --------------------------------------------------------------------------------
 -- ** ...
+
+result :: SigRep sig -> Proxy (Result sig)
+result (SigConst)    = Proxy
+result (SigPart _ b) = result b
+result (SigPred _ a) = result a
 
 erase :: SigRep sig -> SigRep (Erasure sig)
 erase (SigConst)    = SigConst
