@@ -29,18 +29,19 @@ import Data.Proxy (Proxy(..))
 -- | "Put" predicate, asserts that region 'r' is allocated.
 data Put r = Put r
 
--- | Signature annotated with regions.
+-- | Signature with region labels.
 data Label r a =
-         Const a
-       | Label r a :-> Label r a
-       | Put r :=> Label r a
-       | Label r a :^ r
+      Const a
+    | Label r a :-> Label r a
+    | Put r :=> Label r a
+    | Label r a :^ r
 
 infixr 2 :->, :=>
 infixl 1 :^
 
 -- | The original symbol's signature is found after stripping its annotations.
-type family Strip (sig :: Label * *) :: Signature (Put *) * where
+type Strip :: forall r . Label r * -> Signature (Put r) *
+type family Strip sig where
     Strip ('Const a) = 'S.Const a
     Strip (a ':-> b) = Strip a 'S.:-> Strip b
     Strip (p ':=> a) = p 'S.:=> Strip a
@@ -54,32 +55,32 @@ infixr :~~:
 --------------------------------------------------------------------------------
 -- ** ...
 
-type LblRep :: Label * * -> *
-data LblRep sig where
+type LblRep :: forall r . Label r * -> *
+data LblRep lbl where
     LblConst :: Typeable a => LblRep ('Const a)
-    LblPart  :: LblRep a -> LblRep sig -> LblRep (a ':-> sig)
-    LblPred  :: Typeable r => Proxy ('Put r) -> LblRep sig -> LblRep ('Put r ':=> sig)
-    LblAt    :: LblRep sig -> LblRep (sig ':^ r)
+    LblPart  :: LblRep a -> LblRep lbl -> LblRep (a ':-> lbl)
+    LblPred  :: Typeable r => Proxy ('Put r) -> LblRep lbl -> LblRep ('Put r ':=> lbl)
+    LblAt    :: LblRep lbl -> LblRep (lbl ':^ r)
 
-class Lbl sig where
-    label :: LblRep sig
+class Lbl lbl where
+    label :: LblRep lbl
 
 instance Typeable a => Lbl ('Const a) where
     label = LblConst
 
-instance (Lbl a, Lbl sig) => Lbl (a ':-> sig) where
+instance (Lbl a, Lbl lbl) => Lbl (a ':-> lbl) where
     label = LblPart label label
 
-instance (Typeable r, Lbl sig) => Lbl ('Put r ':=> sig) where
+instance (Typeable r, Lbl lbl) => Lbl ('Put r ':=> lbl) where
     label = LblPred Proxy label
 
-instance Lbl sig => Lbl (sig ':^ r) where
+instance Lbl lbl => Lbl (lbl ':^ r) where
     label = LblAt label
 
 --------------------------------------------------------------------------------
 -- ** Implementation of ...
 
-strip :: LblRep sig -> SigRep (Strip sig)
+strip :: forall r (lbl :: Label r *) . Typeable r => LblRep lbl -> SigRep (Strip lbl)
 strip (LblConst)    = SigConst
 strip (LblPart a b) = SigPart (strip a) (strip b)
 strip (LblPred p a) = SigPred p (strip a)

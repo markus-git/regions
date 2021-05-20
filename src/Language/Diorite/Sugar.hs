@@ -3,8 +3,6 @@
 {-# OPTIONS_GHC -fprint-explicit-kinds #-}
 
 {-# LANGUAGE UndecidableInstances #-}
---{-# LANGUAGE FunctionalDependencies #-}
---{-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE InstanceSigs #-}
 
@@ -16,7 +14,7 @@ module Language.Diorite.Sugar
     , sugarSym
     ) where
 
--- Related stuff:
+-- Related:
 --   https://emilaxelsson.github.io/documents/axelsson2013using.pdf
 
 import Language.Diorite.Signatures (Signature(..), Sig)
@@ -24,7 +22,6 @@ import Language.Diorite.Qualifiers (Qualifier(..), QualRep, Qual(..), witUniIden
 import Language.Diorite.Syntax (Beta(..), Eta(..), lam)
 
 import Data.Constraint (Constraint, withDict)
---import Data.Kind
 
 --------------------------------------------------------------------------------
 -- * Syntactic sugaring.

@@ -42,13 +42,15 @@ match :: forall sym qs a c
     -> c ('Const a)
 match matchSym matchVar = flip matchBeta Nil
   where
-    matchBeta :: forall ps sig . (a ~ Result sig) =>
-        Beta sym ps sig -> Args sym ps sig -> c ('Const a)
+    matchBeta :: forall ps sig . a ~ Result sig
+        => Beta sym ps sig
+        -> Args sym ps sig
+        -> c ('Const a)
     matchBeta (Var n)  as = matchVar n as
     matchBeta (Sym s)  as = matchSym s as
     matchBeta (b :$ e) as = matchBeta b (e :* as)
     matchBeta (b :# p) as = matchBeta b (p :~ as)
--- todo: I'm sure 'matchVar' needs to constrain 'ps' to be useful.
+-- todo: the naked 'ps' is a problem.
 
 -- | A version of 'match' with a simpler, constant result type.
 constMatch :: forall sym qs a b

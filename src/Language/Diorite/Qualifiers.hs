@@ -21,15 +21,8 @@ module Language.Diorite.Qualifiers
     , witRemOrd
     , witRemDist
     , witUniIdent
+    , witUniCom
     , witUniAssoc
-    -- * Existentials.
-    , Exists(..)
-    , SmartQual
-    , Unique
-    , ExRep(..)
-    , Ex(..)
-    -- ** ...
-    , smartQual
     ) where
 
 import Data.Proxy (Proxy(..))
@@ -156,69 +149,21 @@ witUniIdent (QualNone) = Refl
 witUniIdent (QualPred _ as) | Refl <- witUniIdent as = Refl
 
 -- | ...
+witUniCom :: QualRep a -> QualRep b -> Union a b :~: Union b a
+witUniCom (QualNone) b | Refl <- witUniIdent b = Refl
+witUniCom _ _ = error "Not commutative..."
+
+-- | ...
 witUniAssoc :: forall a b c . QualRep a -> QualRep b -> QualRep c -> Union a (Union b c) :~: Union (Union a b) c
 witUniAssoc (QualNone) _ _ = Refl
 witUniAssoc (QualPred (a :: Proxy q) (as :: QualRep qs)) b c =
-    case (lhs, rhs) of
-        (Refl, Refl) -> Refl
+    case (lhs, rhs) of (Refl, Refl) -> Refl
   where
     lhs :: Union (q ':. qs) (Union b c) :~: (q ':. Union qs (Union (Remove q b) (Remove q c)))
     lhs = case witRemDist a b c of Refl -> Refl
     
     rhs :: Union (Union (q ':. qs) b) c :~: (q ':. Union qs (Union (Remove q b) (Remove q c)))
     rhs = case witUniAssoc as (remove a b) (remove a c) of Refl -> Refl
-
---------------------------------------------------------------------------------
--- * Exists-stuff
---
--- Since existential quantification isn't really a thing I have these.
--- Not sure this is the best way. Names are also a bit wierd.
---------------------------------------------------------------------------------
-
--- | ...
-data Exists p = Empty | (Exists p) :- (Exists p) | p := (Exists p)
-
--- | ...
-type Unique :: forall p . p -> Exists p -> *
-type Unique q qs = Remove q (SmartQual qs) :~: (SmartQual qs)
-
---------------------------------------------------------------------------------
-
--- | ...
-type ExRep :: Exists p -> *
-data ExRep es where
-    ExEmpty :: ExRep 'Empty
-    ExUnion :: ExRep qs -> ExRep ps -> ExRep (qs ':- ps)
-    ExPred  :: Typeable q => Unique q qs -> Proxy q -> ExRep qs -> ExRep (q ':= qs)
-
--- | ...
-class Ex es where
-    record :: ExRep es
-
-instance Ex ('Empty) where
-    record = ExEmpty
-
-instance (Ex qs, Ex ps) => Ex (qs ':- ps) where
-    record = ExUnion record record
-
-instance (Typeable q, Remove q (SmartQual qs) ~ (SmartQual qs), Ex qs) => Ex (q ':= qs) where
-    record = ExPred Refl Proxy record
-
---------------------------------------------------------------------------------
--- ** todo: smartqual is a bad name for these...
-
--- | ...
-type SmartQual :: forall p . Exists p -> Qualifier p
-type family SmartQual es where
-    SmartQual ('Empty)    = 'None
-    SmartQual (ps ':- qs) = Union (SmartQual ps) (SmartQual qs)
-    SmartQual (_  ':= qs) = SmartQual qs
-
--- | ...
-smartQual :: ExRep es -> QualRep (SmartQual es)
-smartQual (ExEmpty)       = QualNone
-smartQual (ExUnion qs ps) = union (smartQual qs) (smartQual ps)
-smartQual (ExPred _ _ qs) = smartQual qs
 
 --------------------------------------------------------------------------------
 -- * ... type-level stuff ...
@@ -241,7 +186,8 @@ type (:/~:) :: forall k . k -> k -> *
 type (:/~:) a b = (a == b) :~: 'False
 
 -- | Check whether 'a' and 'b' are equal or not.
-test :: forall k (a :: k) (b :: k) . (Typeable a, Typeable b) => Proxy a -> Proxy b -> Either (a :~: b) (a :/~: b)
+test :: forall k (a :: k) (b :: k) . (Typeable a, Typeable b)
+    => Proxy a -> Proxy b -> Either (a :~: b) (a :/~: b)
 test _ _ = case testEquality (typeRep :: TypeRep a) (typeRep :: TypeRep b) of
     Just Refl -> Left Refl
     Nothing   -> Right (Unsafe.unsafeCoerce Refl)

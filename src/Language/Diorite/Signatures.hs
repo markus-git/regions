@@ -58,7 +58,7 @@ type SigRep :: forall p . Signature p * -> *
 data SigRep sig where
     SigConst :: Typeable a => SigRep ('Const a)
     SigPart  :: SigRep a -> SigRep sig -> SigRep (a ':-> sig)
-    SigPred  :: Typeable q => Proxy q -> SigRep sig -> SigRep (q ':=> sig)
+    SigPred  :: Typeable p => Proxy p -> SigRep sig -> SigRep (p ':=> sig)
 
 -- | Valid symbol signatures.
 class Sig sig where

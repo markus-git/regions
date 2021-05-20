@@ -69,6 +69,6 @@ instance Render sym => Show (Eta sym qs a) where
 type family Denotation sig where
     Denotation ('Const a) = a
     Denotation (a ':-> b) = Denotation a -> Denotation b
---  Denotation (p ':=> a) = Name -> Denotation a
+--  Denotation (p ':=> a) = ? -> Denotation a
 
 --------------------------------------------------------------------------------

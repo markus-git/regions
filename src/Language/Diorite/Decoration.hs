@@ -10,8 +10,8 @@ module Language.Diorite.Decoration
     ) where
 
 import Language.Diorite.Signatures (Signature, Result, Sig)
-import Language.Diorite.Qualifiers (Qualifier(..), Exists, Ex)
-import Language.Diorite.Syntax (Beta(..), Eta(..), Sym(..), SmartBeta, SmartEx, SmartSig, SmartSym, Project(..), (:<:)(..), smartSym')
+import Language.Diorite.Qualifiers (Qualifier(..))
+import Language.Diorite.Syntax (Beta(..), Eta(..), Sym(..), SmartBeta, SmartEx, SmartSig, SmartSym, Project(..), (:<:)(..), smartSym', Exists, Ex)
 import Language.Diorite.Interpretation (Render(..))
 
 --------------------------------------------------------------------------------
