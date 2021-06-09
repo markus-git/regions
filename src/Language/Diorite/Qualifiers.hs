@@ -21,7 +21,6 @@ module Language.Diorite.Qualifiers
     , witRemOrd
     , witRemDist
     , witUniIdent
-    , witUniCom
     , witUniAssoc
     ) where
 
@@ -41,6 +40,18 @@ data Qualifier p =
     | p :. Qualifier p
 
 infixr 2 :.
+
+-- | ...
+type (==) :: forall k . k -> k -> Bool
+type family (==) a b where
+    a == a = 'True
+    _ == _ = 'False
+  
+-- | ...
+type If :: forall k . Bool -> k -> k -> k
+type family If c a b where
+    If 'True  a b = a
+    If 'False a b = b
 
 -- | ...
 type Insert :: forall p . p -> Qualifier p -> Qualifier p
@@ -88,6 +99,17 @@ instance (Typeable q, Qual qs) => Qual (q ':. qs) where
 --------------------------------------------------------------------------------
 -- ** Implementation of ...
 
+-- | Short-hand for type inequality.
+type (:/~:) :: forall k . k -> k -> *
+type (:/~:) a b = (a == b) :~: 'False
+
+-- | Check whether 'a' and 'b' are equal or not.
+test :: forall k (a :: k) (b :: k) . (Typeable a, Typeable b)
+    => Proxy a -> Proxy b -> Either (a :~: b) (a :/~: b)
+test _ _ = case testEquality (typeRep :: TypeRep a) (typeRep :: TypeRep b) of
+    Just Refl -> Left Refl
+    Nothing   -> Right (Unsafe.unsafeCoerce Refl)
+
 -- | ...
 insert :: Typeable p => Proxy p -> QualRep qs -> QualRep (Insert p qs)
 insert p (QualNone)      = QualPred p QualNone
@@ -110,15 +132,15 @@ union (QualPred p ps) qs = QualPred p (union ps (remove p qs))
 --------------------------------------------------------------------------------
 -- *** Witness of ...
 
--- | ...
 witInsIdem :: Typeable a => Proxy a -> QualRep b -> Insert a (Insert a b) :~: Insert a b
 witInsIdem _ (QualNone) = Refl
 witInsIdem a (QualPred b bs) | Refl <- witInsIdem a bs =
     case test a b of
         Left  Refl -> Refl
         Right Refl -> Refl
+{-# NOINLINE witInsIdem #-}
+{-# RULES "witInsIdem" forall a b . witInsIdem a b = Unsafe.unsafeCoerce Refl #-}
 
--- | ...
 witRemOrd :: (Typeable a, Typeable b) => Proxy a -> Proxy b -> QualRep c -> Remove a (Remove b c) :~: Remove b (Remove a c)
 witRemOrd _ _ (QualNone) = Refl
 witRemOrd a b (QualPred c cs) | Refl <- witRemOrd a b cs =
@@ -127,8 +149,9 @@ witRemOrd a b (QualPred c cs) | Refl <- witRemOrd a b cs =
         (Right Refl, Right Refl) -> Refl
         (Left  Refl, Right Refl) -> Refl
         (Right Refl, Left  Refl) -> Refl
+{-# NOINLINE witRemOrd #-}
+{-# RULES "witRemOrd" forall a b c . witRemOrd a b c = Unsafe.unsafeCoerce Refl #-}
 
--- | ...
 witRemDist :: forall a b c . Typeable a => Proxy a -> QualRep b -> QualRep c -> Remove a (Union b c) :~: Union (Remove a b) (Remove a c)
 witRemDist _ (QualNone) _ = Refl
 witRemDist a (QualPred (b :: Proxy q) (bs :: QualRep qs)) c =
@@ -142,18 +165,15 @@ witRemDist a (QualPred (b :: Proxy q) (bs :: QualRep qs)) c =
 
     rhs :: Union (q ':. Remove a qs) (Remove a c) :~: (q ':. Union (Remove a qs) (Remove a (Remove q c)))
     rhs = case witRemOrd a b c of Refl -> Refl
+{-# NOINLINE witRemDist #-}
+{-# RULES "witRemDist" forall a b c . witRemDist a b c = Unsafe.unsafeCoerce Refl #-}
 
--- | ...
 witUniIdent :: QualRep a -> Union a 'None :~: a
 witUniIdent (QualNone) = Refl
 witUniIdent (QualPred _ as) | Refl <- witUniIdent as = Refl
+{-# NOINLINE witUniIdent #-}
+{-# RULES "witUniIdent" forall a . witUniIdent a = Unsafe.unsafeCoerce Refl #-}
 
--- | ...
-witUniCom :: QualRep a -> QualRep b -> Union a b :~: Union b a
-witUniCom (QualNone) b | Refl <- witUniIdent b = Refl
-witUniCom _ _ = error "Not commutative..."
-
--- | ...
 witUniAssoc :: forall a b c . QualRep a -> QualRep b -> QualRep c -> Union a (Union b c) :~: Union (Union a b) c
 witUniAssoc (QualNone) _ _ = Refl
 witUniAssoc (QualPred (a :: Proxy q) (as :: QualRep qs)) b c =
@@ -164,33 +184,8 @@ witUniAssoc (QualPred (a :: Proxy q) (as :: QualRep qs)) b c =
     
     rhs :: Union (Union (q ':. qs) b) c :~: (q ':. Union qs (Union (Remove q b) (Remove q c)))
     rhs = case witUniAssoc as (remove a b) (remove a c) of Refl -> Refl
-
---------------------------------------------------------------------------------
--- * ... type-level stuff ...
---------------------------------------------------------------------------------
-
--- | ...
-type (==) :: forall k . k -> k -> Bool
-type family (==) a b where
-    a == a = 'True
-    _ == _ = 'False
-  
--- | ...
-type If :: forall k . Bool -> k -> k -> k
-type family If c a b where
-    If 'True  a b = a
-    If 'False a b = b
-
--- | Short-hand for type inequality.
-type (:/~:) :: forall k . k -> k -> *
-type (:/~:) a b = (a == b) :~: 'False
-
--- | Check whether 'a' and 'b' are equal or not.
-test :: forall k (a :: k) (b :: k) . (Typeable a, Typeable b)
-    => Proxy a -> Proxy b -> Either (a :~: b) (a :/~: b)
-test _ _ = case testEquality (typeRep :: TypeRep a) (typeRep :: TypeRep b) of
-    Just Refl -> Left Refl
-    Nothing   -> Right (Unsafe.unsafeCoerce Refl)
+{-# NOINLINE witUniAssoc #-}
+{-# RULES "witUniAssoc" forall a b c . witUniAssoc a b c = Unsafe.unsafeCoerce Refl #-}
 
 --------------------------------------------------------------------------------
 -- Fin.

@@ -143,7 +143,8 @@ elam f = Ev v :\\ body
 -- | ...
 data Exists p = Empty | Fun (Exists p) (Exists p) | Pre p (Exists p)
 -- note: Since existential quantification isn't really a thing in Haskell I have
--- these 'Exists' like types to distribute qualifiers.
+--       these 'Exists' like types to distribute qualifiers. Not sure what a
+--       better named for it would be...
 
 -- | ...
 type Unique :: forall p . p -> Exists p -> *
