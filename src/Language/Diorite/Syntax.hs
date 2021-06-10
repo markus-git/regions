@@ -48,7 +48,7 @@ module Language.Diorite.Syntax
 import Language.Diorite.Signatures
 import Language.Diorite.Qualifiers
 
-import Data.Constraint (withDict, HasDict)
+import Data.Constraint (withDict, HasDict, Constraint)
 import Data.Proxy (Proxy(..))
 import Data.Typeable (Typeable, eqT)
 import Data.Type.Equality ((:~:)(..))
@@ -94,6 +94,7 @@ type AST sym qs sig = Beta sym qs sig
 type ASTF sym qs a = Beta sym qs ('Const a)
 
 -- | Symbol with a valid signature.
+type  Sym :: forall p . (Signature p * -> *) -> Constraint
 class Sym sym where
     symbol :: sym sig -> SigRep sig
 
@@ -149,15 +150,15 @@ data Exists p = Empty | Fun (Exists p) (Exists p) | Pre p (Exists p)
 -- | ...
 type Unique :: forall p . p -> Exists p -> *
 type Unique q qs = Remove q (SmartQual qs) :~: (SmartQual qs)
+-- todo: Turn this into a class constraint?
 
 -- | ...
-type ExRep :: Exists p -> *
+type ExRep :: forall p . Exists p -> *
 data ExRep es where
     ExEmpty :: ExRep 'Empty
     ExUnion :: ExRep qs -> ExRep ps -> ExRep ('Fun qs ps)
     ExPred  :: Typeable q => Unique q qs -> Proxy q -> ExRep qs -> ExRep ('Pre q qs)
 
--- | ...
 class Ex es where
     record :: ExRep es
 
@@ -173,8 +174,7 @@ instance (Typeable q, Remove q (SmartQual qs) ~ (SmartQual qs), Ex qs) => Ex ('P
 --------------------------------------------------------------------------------
 
 -- | Map a symbol to its corresponding "smart" constructor.
-type SmartBeta :: forall p .
-    (Signature p * -> *) -> Qualifier p -> Exists p -> Signature p * -> *
+type SmartBeta :: forall p . (Signature p * -> *) -> Qualifier p -> Exists p -> Signature p * -> *
 type family SmartBeta sym qs ex sig where
     SmartBeta sym qs ('Empty)     ('Const a) = Beta sym qs ('Const a)
     SmartBeta sym qs ('Fun ps rs) (a ':-> b) = SmartBeta sym 'None ps a -> SmartBeta sym (Union qs (SmartQual ps)) rs b
@@ -217,7 +217,7 @@ smartQual (ExPred _ _ qs) = smartQual qs
 --------------------------------------------------------------------------------
 
 -- | Make a "smart" constructor for a symbol.
-smartSym' :: forall p (es :: Exists p) sym (sig :: Signature p *) f
+smartSym' :: forall p (es :: Exists p) (sym :: Signature p * -> *) (sig :: Signature p *) (f :: *)
     .  ( Sig sig
        , Ex es
        , f   ~ SmartBeta sym 'None es sig
@@ -256,6 +256,7 @@ smartSym' sym = smartBeta (record :: ExRep es) (signature :: SigRep sig) (Sym sy
 data Empty :: * -> *
 
 -- | Direct sum of two symbol domains.
+type (:+:) :: forall k . (k -> *) -> (k -> *) -> k -> *
 data (sym1 :+: sym2) sig
   where
     InjL :: sym1 a -> (sym1 :+: sym2) a
@@ -272,6 +273,7 @@ instance (Sym sym1, Sym sym2) => Sym (sym1 :+: sym2)
 --------------------------------------------------------------------------------
 
 -- | Partial symbol projection.
+type  Project :: forall k. (k -> *) -> (k -> *) -> Constraint
 class Project sub sup where
     prj :: sup a -> Maybe (sub a)
 
@@ -293,6 +295,7 @@ instance {-# OVERLAPS #-} Project sym1 sym3 => Project sym1 (sym2 :+: sym3) wher
 --------------------------------------------------------------------------------
 
 -- | Symbol injection.
+type (:<:) :: forall k. (k -> *) -> (k -> *) -> Constraint
 class Project sub sup => sub :<: sup where
     inj :: sub a -> sup a
 

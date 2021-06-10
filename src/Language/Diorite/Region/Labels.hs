@@ -6,7 +6,6 @@ module Language.Diorite.Region.Labels
       Put(..)
     , Label(..)
     , Strip
-    , (:~~:)(..)
     -- ** ...
     , LblRep(..)
     , Lbl(..)
@@ -18,6 +17,7 @@ module Language.Diorite.Region.Labels
 import Language.Diorite.Signatures (Signature, Erasure, SigRep(..), erase, testSig)
 import qualified Language.Diorite.Signatures as S (Signature(..))
 
+import Data.Constraint (Constraint)
 import Data.Type.Equality ((:~:)(..))
 import Data.Typeable (Typeable)
 import Data.Proxy (Proxy(..))
@@ -47,11 +47,6 @@ type family Strip sig where
     Strip (p ':=> a) = p 'S.:=> Strip a
     Strip (a ':^ _)  = Strip a
 
--- | Witness of equality between a symbol's signature and its erased annotation.
-newtype sig :~~: lbl = Stripped (sig :~: Strip lbl)
-
-infixr :~~:
-
 --------------------------------------------------------------------------------
 -- ** ...
 
@@ -62,6 +57,7 @@ data LblRep lbl where
     LblPred  :: Typeable r => Proxy ('Put r) -> LblRep lbl -> LblRep ('Put r ':=> lbl)
     LblAt    :: LblRep lbl -> LblRep (lbl ':^ r)
 
+type  Lbl :: forall r . Label r * -> Constraint
 class Lbl lbl where
     label :: LblRep lbl
 

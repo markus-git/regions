@@ -6,6 +6,8 @@ module Language.Diorite.Qualifiers
     (
     -- * Qualifiers.
       Qualifier(..)
+    , (==)
+    , If
     , Insert
     , Remove
     , Union
