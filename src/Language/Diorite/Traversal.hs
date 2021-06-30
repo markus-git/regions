@@ -11,7 +11,7 @@ module Language.Diorite.Traversal
 
 import Language.Diorite.Signatures (Signature(..), Result)
 import Language.Diorite.Qualifiers (Qualifier(..), Union)
-import Language.Diorite.Syntax (Name, Ev, Beta(..), Eta(..), ASTF)
+import Language.Diorite.Syntax (Name, Ev, Symbol, Beta(..), Eta(..), ASTF)
 
 import qualified Control.Applicative as A
 
@@ -20,7 +20,7 @@ import qualified Control.Applicative as A
 --------------------------------------------------------------------------------
 
 -- | List of a symbol's arguments.
-type Args :: forall p . (Signature p * -> *) -> Qualifier p -> Signature p * -> *
+type Args :: forall p . Symbol p * -> Qualifier p -> Signature p * -> *
 data Args sym qs sig where
     Nil  :: Args sym qs ('Const a)
     (:*) :: Eta sym ps a -> Args sym (Union qs ps) sig -> Args sym qs (a ':-> sig)

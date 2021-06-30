@@ -6,7 +6,7 @@ module Language.Diorite.Qualifiers
     (
     -- * Qualifiers.
       Qualifier(..)
-    , (==)
+    , type (==)
     , If
     , Insert
     , Remove
@@ -54,8 +54,10 @@ type If :: forall k . Bool -> k -> k -> k
 type family If c a b where
     If 'True  a b = a
     If 'False a b = b
+-- note: The explicit 'If', rather than matching on 'a' against 'b', is useful
+--       when writing witnesses because we cannot check for in-equalities.
 
--- | ...
+-- | Insert a predicate into a set of qualifiers.
 type Insert :: forall p . p -> Qualifier p -> Qualifier p
 type family Insert p qs where
     Insert p ('None)    = p ':. 'None
@@ -73,7 +75,7 @@ type family Union ps qs where
     Union ('None)    qs = qs
     Union (p ':. ps) qs = p ':. Union ps (Remove p qs)
 
--- | ...
+-- | Remove any predicates in the second set of qualifiers from the first set.
 type Difference :: forall p . Qualifier p -> Qualifier p -> Qualifier p
 type family Difference ps qs where
   Difference ps ('None)    = ps

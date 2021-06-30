@@ -12,6 +12,7 @@ module Language.Diorite.Syntax
     -- * Abstract syntax trees.
       Name
     , Ev(..)
+    , Symbol
     , Beta(..)
     , Eta(..)
     , AST
@@ -36,8 +37,6 @@ module Language.Diorite.Syntax
     , (:<:)(..)
     , smartSym
     -- * Utilities.
---  , Ex(..)
---  , liftE
     , (|-)
     , eqP
     ) where
@@ -63,8 +62,11 @@ type Name = Int
 -- | Evidence names, associated with some 'q'.
 newtype Ev q = Ev Name
 
+-- | Kind short-hand for symbols.
+type Symbol p a = Signature p a -> a
+
 -- | Generic abstract syntax tree with beta-eta long normal form.
-type Beta :: forall p . (Signature p * -> *) -> Qualifier p -> Signature p * -> *
+type Beta :: forall p . Symbol p * -> Qualifier p -> Signature p * -> *
 data Beta sym qs sig where
     -- ^ Variable.
     Var   :: Sig sig => Name -> Beta sym qs sig
@@ -75,7 +77,7 @@ data Beta sym qs sig where
     -- ^ Evidence-application.
     (:#)  :: Beta sym qs (q ':=> sig) -> Ev q -> Beta sym (q ':. qs) sig
 
-type Eta :: forall p . (Signature p * -> *) -> Qualifier p -> Signature p * -> *
+type Eta :: forall p . Symbol p * -> Qualifier p -> Signature p * -> *
 data Eta sym qs sig where
     -- ^ Body.
     Spine :: Beta sym qs ('Const a) -> Eta sym qs ('Const a)
@@ -94,7 +96,7 @@ type AST sym qs sig = Beta sym qs sig
 type ASTF sym qs a = Beta sym qs ('Const a)
 
 -- | Symbol with a valid signature.
-type  Sym :: forall p . (Signature p * -> *) -> Constraint
+type  Sym :: forall p . Symbol p * -> Constraint
 class Sym sym where
     symbol :: sym sig -> SigRep sig
 
@@ -174,7 +176,7 @@ instance (Typeable q, Remove q (SmartQual qs) ~ (SmartQual qs), Ex qs) => Ex ('P
 --------------------------------------------------------------------------------
 
 -- | Map a symbol to its corresponding "smart" constructor.
-type SmartBeta :: forall p . (Signature p * -> *) -> Qualifier p -> Exists p -> Signature p * -> *
+type SmartBeta :: forall p . Symbol p * -> Qualifier p -> Exists p -> Signature p * -> *
 type family SmartBeta sym qs ex sig where
     SmartBeta sym qs ('Empty)     ('Const a) = Beta sym qs ('Const a)
     SmartBeta sym qs ('Fun ps rs) (a ':-> b) = SmartBeta sym 'None ps a -> SmartBeta sym (Union qs (SmartQual ps)) rs b
@@ -202,7 +204,7 @@ type family SmartEx f where
     SmartEx (a -> f)    = 'Fun (SmartEx a) (SmartEx f)
 
 -- | Fetch the symbol of a "smart" constructor.
-type SmartSym :: forall p . * -> (Signature p * -> *)
+type SmartSym :: forall p . * -> Symbol p *
 type family SmartSym f where
     SmartSym (AST s _ _) = s
     SmartSym (Ev _ -> f) = SmartSym f
@@ -217,7 +219,7 @@ smartQual (ExPred _ _ qs) = smartQual qs
 --------------------------------------------------------------------------------
 
 -- | Make a "smart" constructor for a symbol.
-smartSym' :: forall p (es :: Exists p) (sym :: Signature p * -> *) (sig :: Signature p *) (f :: *)
+smartSym' :: forall p (es :: Exists p) (sym :: Symbol p *) (sig :: Signature p *) (f :: *)
     .  ( Sig sig
        , Ex es
        , f   ~ SmartBeta sym 'None es sig
@@ -329,13 +331,6 @@ smartSym = smartSym' . inj
 --------------------------------------------------------------------------------
 -- ** Utils.
 --------------------------------------------------------------------------------
-
--- -- | Existential quantification.
--- data Ex e where
---     Ex :: e a -> Ex e
-
--- liftE :: (forall a . e a -> b) -> Ex e -> b
--- liftE f (Ex a) = f a
 
 (|-) :: HasDict c e => e -> (c => r) -> r
 (|-) = withDict

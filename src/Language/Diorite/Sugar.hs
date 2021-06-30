@@ -19,7 +19,7 @@ module Language.Diorite.Sugar
 
 import Language.Diorite.Signatures (Signature(..), Sig)
 import Language.Diorite.Qualifiers (Qualifier(..), QualRep, Qual(..), witUniIdent)
-import Language.Diorite.Syntax (Beta(..), Eta(..), lam)
+import Language.Diorite.Syntax (Symbol, Beta(..), Eta(..), lam)
 
 import Data.Constraint (Constraint, withDict)
 
@@ -31,7 +31,7 @@ import Data.Constraint (Constraint, withDict)
 type Syntactic :: * -> Constraint
 class Syntactic a where
     type Pred a     :: *
-    type Domain a   :: Signature p * -> *
+    type Domain a   :: Symbol p *
     type Context a  :: Qualifier p
     type Internal a :: Signature p *
     sugar   :: Pred a ~ p => Beta @p (Domain @p a) (Context @p a) (Internal @p a) -> a
