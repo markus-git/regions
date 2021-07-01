@@ -54,8 +54,6 @@ type If :: forall k . Bool -> k -> k -> k
 type family If c a b where
     If 'True  a b = a
     If 'False a b = b
--- note: The explicit 'If', rather than matching on 'a' against 'b', is useful
---       when writing witnesses because we cannot check for in-equalities.
 
 -- | Insert a predicate into a set of qualifiers.
 type Insert :: forall p . p -> Qualifier p -> Qualifier p

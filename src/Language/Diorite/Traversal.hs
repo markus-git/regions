@@ -27,14 +27,16 @@ data Args sym qs sig where
     (:~) :: Ev p -> Args sym (p ':. qs) sig -> Args sym qs (p ':=> sig)
 
 infixr :*, :~
-  
+
+--------------------------------------------------------------------------------
+
 -- | "Pattern match" on a fully applied 'AST' using a function that gets direct
 --   access to the top-most symbol and its sub-trees given as 'Args'.
 match :: forall sym qs a c
     .  (forall sig . a ~ Result sig =>
             sym sig -> Args sym 'None sig -> c ('Const a))
        -- ^ Match on a symbol.
-    -> (forall ps sig . (a ~ Result sig) =>
+    -> (forall ps sig . a ~ Result sig =>
             Name -> Args sym ps sig -> c ('Const a))
        -- ^ Lookup and instantiate a variable.
     -> ASTF sym qs a

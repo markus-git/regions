@@ -8,8 +8,8 @@ module Language.Diorite.Region.Annotate
 
 import Language.Diorite.Signatures (Signature, Result, SigRep(..))
 import Language.Diorite.Qualifiers (Qualifier(..), type (==), If, Remove, Union, Difference, QualRep(..))
-import Language.Diorite.Syntax (Name, Ev(..), Beta(..), Eta(..), AST, ASTF, elam, (:+:)(..), (:<:)(..))
---import Language.Diorite.Traversal (Args(..), constMatch)
+import Language.Diorite.Syntax (Name, Ev(..), Symbol, Beta(..), Eta(..), AST, ASTF, elam, (:+:)(..), (:<:)(..))
+import Language.Diorite.Traversal (Args(..), constMatch)
 import qualified Language.Diorite.Signatures as S (Signature(..))
 
 import Data.Constraint (Constraint)
@@ -56,6 +56,7 @@ type Rgn :: forall r . Signature (Put r) * -> *
 data Rgn sig where
     Local :: Rgn (('Put r 'S.:=> 'S.Const a) 'S.:-> 'S.Const a)
     At    :: Rgn ('Put r 'S.:=> a 'S.:-> sig)
+-- todo: 'Put r' here really limits the choice for predicates.
 
 -- | Introduce a local binding for place associated with region 'r'.
 local :: forall sym r qs a
@@ -112,10 +113,9 @@ data LblRep l where
     LblPart  :: LblRep a -> LblRep sig -> LblRep (a ':-> sig)
     LblPred  :: Proxy ('Put r) -> LblRep sig -> LblRep ('Put r ':=> sig)
     LblAt    :: Proxy r -> LblRep sig -> LblRep (sig ':^ r)
--- todo: 'Put r' in 'LblPred' really limits the choice for predicates.
 
 -- | Witness of equality between a symbol's signature and its erased annotation.
-newtype sig :~~: lbl = Stripped (sig :~: Strip lbl)
+newtype lbl :~~: sig = Stripped (Strip lbl :~: sig)
 infixr :~~:
 
 type LBeta sym qs sig l = (Beta sym qs sig, LblRep l, l :~~: sig)
@@ -172,18 +172,20 @@ instance (Strip b ~ a) => (~~) a b
 -- Ex-Beta stuff.
 
 type EBeta :: forall r
-    .  (Signature (Put r) * -> *)
+    .  (Symbol (Put r) *)
     -> (Qualifier (Put r) -> Constraint)
     -> (Label r * -> Constraint)
-    -> Label r *
     -> *
-data EBeta sym p q sig where
-    Ex :: forall qs sig . (p qs, q sig)
-        => LBeta sym qs sig lbl
-        -> ExBeta sym p q
+data EBeta sym p q where
+    Ex :: (p qs, q l) => LBeta sym qs sig l -> EBeta sym p q
 
-annotate :: Beta sym qs sig -> EBeta sym ((>=) qs) ((~~) sig)
-annotate = undefined
+annotateSym :: a ~ Result sig => sym sig -> Args sym 'None sig -> EBeta sym ((>=) ?) ((~~) ('S.Const a))
+annotateSym sym (Nil)     = undefined
+annotateSym sym (e :* as) = undefined
+annotateSym sym (p :~ as) = undefined
+
+annotate :: Beta sym qs ('S.Const a) -> EBeta sym ((>=) qs) ((~~) ('S.Const a))
+annotate ast = constMatch annotateSym undefined ast
 
 --------------------------------------------------------------------------------
 -- Fin.
