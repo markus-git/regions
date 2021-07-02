@@ -7,7 +7,7 @@ module Language.Diorite.Region.Annotate
     ) where
 
 import Language.Diorite.Signatures (Signature, Result, SigRep(..))
-import Language.Diorite.Qualifiers (Qualifier(..), type (==), If, Remove, Union, Difference, QualRep(..))
+import Language.Diorite.Qualifiers (Qualifier(..), type (==), If, Remove, Union, Difference, QualRep(..), Qual(..))
 import Language.Diorite.Syntax (Name, Ev(..), Symbol, Beta(..), Eta(..), AST, ASTF, elam, (:+:)(..), (:<:)(..))
 import Language.Diorite.Traversal (Args(..), constMatch)
 import qualified Language.Diorite.Signatures as S (Signature(..))
@@ -178,14 +178,23 @@ type EBeta :: forall r
     -> *
 data EBeta sym p q where
     Ex :: (p qs, q l) => LBeta sym qs sig l -> EBeta sym p q
+--type LBeta sym qs sig l = (Beta sym qs sig, LblRep l, l :~~: sig)
+--type LEta  sym qs sig l = (Eta  sym qs sig, LblRep l, l :~~: sig)
 
-annotateSym :: a ~ Result sig => sym sig -> Args sym 'None sig -> EBeta sym ((>=) ?) ((~~) ('S.Const a))
-annotateSym sym (Nil)     = undefined
-annotateSym sym (e :* as) = undefined
-annotateSym sym (p :~ as) = undefined
+annotateSym :: a ~ Result sig
+    => sym sig
+    -> QualRep qs
+    -> Args sym 'None sig
+    -> EBeta sym ((>=) qs) ((~~) ('S.Const a))
+annotateSym sym qs (Nil)     = undefined
+annotateSym sym qs (e :* as) = undefined
+annotateSym sym qs (p :~ as) = undefined
 
-annotate :: Beta sym qs ('S.Const a) -> EBeta sym ((>=) qs) ((~~) ('S.Const a))
-annotate ast = constMatch annotateSym undefined ast
+annotate ::
+       Qual qs
+    => Beta sym qs ('S.Const a)
+    -> EBeta sym ((>=) qs) ((~~) ('S.Const a))
+annotate = constMatch (\sym as -> annotateSym sym qualifier as) undefined
 
 --------------------------------------------------------------------------------
 -- Fin.

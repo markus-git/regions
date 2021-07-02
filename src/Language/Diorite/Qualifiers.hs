@@ -12,6 +12,10 @@ module Language.Diorite.Qualifiers
     , Remove
     , Union
     , Difference
+    , Elem
+    , Subset
+    , type (>=)
+    -- ** ...
     , QualRep(..)
     , Qual(..)
     -- ** ...
@@ -24,6 +28,7 @@ module Language.Diorite.Qualifiers
     , witRemDist
     , witUniIdent
     , witUniAssoc
+    , witSubsetFull
     ) where
 
 import Data.Proxy (Proxy(..))
@@ -78,6 +83,24 @@ type Difference :: forall p . Qualifier p -> Qualifier p -> Qualifier p
 type family Difference ps qs where
   Difference ps ('None)    = ps
   Difference ps (q ':. qs) = Difference (Remove q ps) qs
+
+-- | Check if a predicate is part of a set of qualifiers.
+type Elem :: forall p . p -> Qualifier p -> Bool
+type family Elem p qs where
+    Elem p ('None)    = 'False
+    Elem p (q ':. qs) = If (p == q) 'True (Elem p qs)
+
+-- | Check if the first set of qualifiers is a subset of the second one.
+type Subset :: forall p . Qualifier p -> Qualifier p -> Bool
+type family Subset ps qs where
+    Subset ('None)    qs = 'True
+    Subset (p ':. ps) qs = If (Elem p qs) (Subset ps qs) 'False
+
+--------------------------------------------------------------------------------
+
+-- | ...
+class    (Subset ps qs ~ 'True) => qs >= ps
+instance (Subset ps qs ~ 'True) => qs >= ps
 
 --------------------------------------------------------------------------------
 -- ** Rep. of a valid qualifier.
@@ -188,6 +211,9 @@ witUniAssoc (QualPred (a :: Proxy q) (as :: QualRep qs)) b c =
     rhs = case witUniAssoc as (remove a b) (remove a c) of Refl -> Refl
 {-# NOINLINE witUniAssoc #-}
 {-# RULES "witUniAssoc" forall a b c . witUniAssoc a b c = Unsafe.unsafeCoerce Refl #-}
+
+witSubsetFull :: QualRep a -> Subset a a :~: 'True
+witSubsetFull (QualNone) = Refl
 
 --------------------------------------------------------------------------------
 -- Fin.
