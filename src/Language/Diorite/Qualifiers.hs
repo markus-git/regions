@@ -29,7 +29,10 @@ module Language.Diorite.Qualifiers
     , witUniIdent
     , witUniAssoc
     , witElemCons
-    --, witSubsetFull
+    , witSubsetElem
+    , witSubsetRem
+    , witSubsetCons
+    , witSubsetFull
     ) where
 
 import Data.Proxy (Proxy(..))
@@ -186,10 +189,10 @@ witRemDist a (QualPred (b :: Proxy q) (bs :: QualRep qs)) c =
             (Refl, Refl) -> Refl
   where
     lhs :: (q ':. Remove a (Union qs (Remove q c))) :~: (q ':. Union (Remove a qs) (Remove a (Remove q c)))
-    lhs = case witRemDist a bs (remove b c) of Refl -> Refl
+    lhs | Refl <- witRemDist a bs (remove b c) = Refl
 
     rhs :: Union (q ':. Remove a qs) (Remove a c) :~: (q ':. Union (Remove a qs) (Remove a (Remove q c)))
-    rhs = case witRemOrd a b c of Refl -> Refl
+    rhs | Refl <- witRemOrd a b c = Refl
 {-# NOINLINE witRemDist #-}
 {-# RULES "witRemDist" forall a b c . witRemDist a b c = Unsafe.unsafeCoerce Refl #-}
 
@@ -203,13 +206,13 @@ witUniAssoc :: forall a b c . QualRep a -> QualRep b -> QualRep c -> Union a (Un
 witUniAssoc (QualNone) _ _ = Refl
 witUniAssoc (QualPred (a :: Proxy q) (as :: QualRep qs)) b c =
     case (lhs, rhs) of
-      (Refl, Refl) -> Refl
+        (Refl, Refl) -> Refl
   where
     lhs :: Union (q ':. qs) (Union b c) :~: (q ':. Union qs (Union (Remove q b) (Remove q c)))
-    lhs = case witRemDist a b c of Refl -> Refl
+    lhs | Refl <- witRemDist a b c = Refl
     
     rhs :: Union (Union (q ':. qs) b) c :~: (q ':. Union qs (Union (Remove q b) (Remove q c)))
-    rhs = case witUniAssoc as (remove a b) (remove a c) of Refl -> Refl
+    rhs | Refl <- witUniAssoc as (remove a b) (remove a c) = Refl
 {-# NOINLINE witUniAssoc #-}
 {-# RULES "witUniAssoc" forall a b c . witUniAssoc a b c = Unsafe.unsafeCoerce Refl #-}
 
@@ -228,25 +231,34 @@ testElem a (QualPred b bs) =
         Left  Refl -> Left Refl
         Right Refl -> testElem a bs
 
-witSubsetIn :: forall a as b . QualRep (a ':. as) -> QualRep b -> Subset (a ':. as) b :~: 'True -> Elem a b :~: 'True
-witSubsetIn (QualPred a _) b Refl =
+-- todo :: forall a b c . Typeable c => QualRep a -> QualRep b -> Proxy c -> Subset a b :~: 'True -> Elem c a :~: 'True -> Elem c b :~: 'True
+witSubsetElem :: forall a as b . QualRep (a ':. as) -> QualRep b -> Subset (a ':. as) b :~: 'True -> Elem a b :~: 'True
+witSubsetElem (QualPred a _) b Refl =
     case testElem a b of
         Left  Refl -> Refl
         Right _    -> error "inaccessible right hand side"
+{-# NOINLINE witSubsetElem #-}
+{-# RULES "witSubsetElem" forall a b . witSubsetElem a b Refl = Unsafe.unsafeCoerce Refl #-}
 
--- witSubsetRem :: forall a as b . QualRep (a ':. as) -> QualRep b -> Subset (a ':. as) b :~: 'True -> Subset as b :~: 'True
--- witSubsetRem (QualPred _ _) _ Refl = undefined
+witSubsetRem :: forall a as b . QualRep (a ':. as) -> QualRep b -> Subset (a ':. as) b :~: 'True -> Subset as b :~: 'True
+witSubsetRem a b Refl | Refl <- witSubsetElem a b Refl = Refl
+{-# NOINLINE witSubsetRem #-}
+{-# RULES "witSubsetRem" forall a b . witSubsetRem a b Refl = Unsafe.unsafeCoerce Refl #-}
 
--- witSubsetElem :: forall a b c . Typeable c => QualRep a -> QualRep b -> Proxy c -> Subset a b :~: 'True -> Elem c a :~: 'True -> Elem c b :~: 'True
--- witSubsetElem _ _ _ Refl Refl = undefined
+witSubsetCons :: forall a b c . Typeable c => QualRep a -> QualRep b -> Proxy c -> Subset a b :~: 'True -> Subset a (c ':. b) :~: 'True
+witSubsetCons (QualNone) _ _ _ = Refl
+witSubsetCons (QualPred a as) b c Refl =
+    case test a c of
+        Left  Refl | Refl <- witSubsetRem  (QualPred a as) b Refl, Refl <- witSubsetCons as b c Refl -> Refl
+        Right Refl | Refl <- witSubsetElem (QualPred a as) b Refl, Refl <- witSubsetCons as b c Refl -> Refl
+{-# NOINLINE witSubsetCons #-}
+{-# RULES "witSubsetCons" forall a b c . witSubsetCons a b c Refl = Unsafe.unsafeCoerce Refl #-}
 
---witSubsetCons :: forall a b c . QualRep a -> QualRep b -> Proxy c -> Subset a b :~: 'True -> Subset a (c ':. b) :~: 'True
---witSubsetCons (QualNone) _ _ _ = Refl
---witSubsetCons (QualPred (a :: Proxy q) (as :: QualRep qs)) bs c Refl = undefined
-
---witSubsetFull :: QualRep a -> Subset a a :~: 'True
---witSubsetFull (QualNone)      = Refl
---witSubsetFull (QualPred a as) = undefined
+witSubsetFull :: QualRep a -> Subset a a :~: 'True
+witSubsetFull (QualNone) = Refl
+witSubsetFull (QualPred a as) | Refl <- witSubsetFull as, Refl <- witSubsetCons as as a Refl = Refl
+{-# NOINLINE witSubsetFull #-}
+{-# RULES "witSubsetFull" forall a . witSubsetFull a = Unsafe.unsafeCoerce Refl #-}
 
 --------------------------------------------------------------------------------
 -- Fin.
