@@ -32,7 +32,9 @@ module Language.Diorite.Qualifiers
     , witSubsetElem
     , witSubsetRem
     , witSubsetCons
-    , witSubsetFull
+    , witSubsetRefl
+    , witSubsetIn
+    , witSubsetTrans
     ) where
 
 import Data.Proxy (Proxy(..))
@@ -231,7 +233,7 @@ testElem a (QualPred b bs) =
         Left  Refl -> Left Refl
         Right Refl -> testElem a bs
 
--- todo :: forall a b c . Typeable c => QualRep a -> QualRep b -> Proxy c -> Subset a b :~: 'True -> Elem c a :~: 'True -> Elem c b :~: 'True
+-- note: removing 'Right ..' leads to missing cases, but writing out 'Right Refl' produces an inaccessible rhs error...
 witSubsetElem :: forall a as b . QualRep (a ':. as) -> QualRep b -> Subset (a ':. as) b :~: 'True -> Elem a b :~: 'True
 witSubsetElem (QualPred a _) b Refl =
     case testElem a b of
@@ -254,11 +256,29 @@ witSubsetCons (QualPred a as) b c Refl =
 {-# NOINLINE witSubsetCons #-}
 {-# RULES "witSubsetCons" forall a b c . witSubsetCons a b c Refl = Unsafe.unsafeCoerce Refl #-}
 
-witSubsetFull :: QualRep a -> Subset a a :~: 'True
-witSubsetFull (QualNone) = Refl
-witSubsetFull (QualPred a as) | Refl <- witSubsetFull as, Refl <- witSubsetCons as as a Refl = Refl
-{-# NOINLINE witSubsetFull #-}
-{-# RULES "witSubsetFull" forall a . witSubsetFull a = Unsafe.unsafeCoerce Refl #-}
+witSubsetRefl :: forall a . QualRep a -> Subset a a :~: 'True
+witSubsetRefl (QualNone) = Refl
+witSubsetRefl (QualPred a as) | Refl <- witSubsetRefl as, Refl <- witSubsetCons as as a Refl = Refl
+{-# NOINLINE witSubsetRefl #-}
+{-# RULES "witSubsetRefl" forall a . witSubsetRefl a = Unsafe.unsafeCoerce Refl #-}
+
+witSubsetIn :: forall a b c . Typeable c => QualRep a -> QualRep b -> Proxy c -> Subset a b :~: 'True -> Elem c a :~: 'True -> Elem c b :~: 'True
+witSubsetIn x@(QualPred a as) b c Refl Refl =
+    case test c a of
+        Left  Refl | Refl <- witSubsetElem x b Refl -> Refl
+        Right Refl | Refl <- witSubsetRem x b Refl, Refl <- witSubsetIn as b c Refl Refl -> Refl
+{-# NOINLINE witSubsetIn #-}
+{-# RULES "witSubsetIn" forall a b c . witSubsetIn a b c Refl Refl = Unsafe.unsafeCoerce Refl #-}
+
+witSubsetTrans :: forall a b c . QualRep a -> QualRep b -> QualRep c -> Subset a b :~: 'True -> Subset b c :~: 'True -> Subset a c :~: 'True
+witSubsetTrans (QualNone) _ _ _ _ = Refl
+witSubsetTrans x@(QualPred a as) b c Refl Refl
+    | Refl <- witSubsetElem x b Refl
+    , Refl <- witSubsetIn b c a Refl Refl
+    , Refl <- witSubsetTrans as b c Refl Refl
+    = Refl
+{-# NOINLINE witSubsetTrans #-}
+{-# RULES "witSubsetTrans" forall a b c . witSubsetTrans a b c Refl Refl = Unsafe.unsafeCoerce Refl #-}
 
 --------------------------------------------------------------------------------
 -- Fin.
