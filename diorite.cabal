@@ -20,6 +20,7 @@ library
     Language.Diorite
     Language.Diorite.Signatures
     Language.Diorite.Qualifiers
+    Language.Diorite.Qualifiers.Witness
     Language.Diorite.Syntax
     Language.Diorite.Sugar
     Language.Diorite.Interpretation

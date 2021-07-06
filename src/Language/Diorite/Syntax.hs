@@ -46,6 +46,7 @@ module Language.Diorite.Syntax
 
 import Language.Diorite.Signatures
 import Language.Diorite.Qualifiers
+import Language.Diorite.Qualifiers.Witness
 
 import Data.Constraint (withDict, HasDict, Constraint)
 import Data.Proxy (Proxy(..))

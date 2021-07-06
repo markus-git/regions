@@ -18,7 +18,8 @@ module Language.Diorite.Sugar
 --   https://emilaxelsson.github.io/documents/axelsson2013using.pdf
 
 import Language.Diorite.Signatures (Signature(..), Sig)
-import Language.Diorite.Qualifiers (Qualifier(..), QualRep, Qual(..), witUniIdent)
+import Language.Diorite.Qualifiers (Qualifier(..), QualRep, Qual(..))
+import Language.Diorite.Qualifiers.Witness (witUniIdent)
 import Language.Diorite.Syntax (Symbol, Beta(..), Eta(..), lam)
 
 import Data.Constraint (Constraint, withDict)
