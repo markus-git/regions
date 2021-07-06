@@ -10,7 +10,7 @@ module Language.Diorite.Traversal
     ) where
 
 import Language.Diorite.Signatures (Signature(..), Result)
-import Language.Diorite.Qualifiers (Qualifier(..), Union, Subset, QualRep, Qual(..), witUniIdent, witSubsetRefl)
+import Language.Diorite.Qualifiers (Qualifier(..), Union, Subset, QualRep, Qual(..), witUniIdent, witSubRefl)
 import Language.Diorite.Syntax (Name, Ev, Symbol, Beta(..), Eta(..), ASTF, (|-))
 
 -- import qualified Control.Applicative as A
@@ -57,7 +57,7 @@ match :: forall sym qs a c . (Qual qs)
     -> ASTF sym qs a
        -- ^ Expression to traverse.
     -> c ('Const a)
-match matchSym matchVar = witUniIdent qual |- witSubsetRefl qual |- flip matchBeta Nil
+match matchSym matchVar = witUniIdent qual |- witSubRefl qual |- flip matchBeta Nil
   where
     qual :: QualRep qs
     qual = qualifier
