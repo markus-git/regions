@@ -27,20 +27,11 @@ import Language.Diorite.Syntax (Name, Ev, Symbol, Beta(..), Eta(..), ASTF, (|-))
 --     (:~) :: Ev p -> Args sym (p ':. qs) sig -> Args sym qs (p ':=> sig)
 
 -- | List of a symbol's arguments.
-type Args :: forall p .
-             Symbol p *
-          -> Qualifier p
-          -> Qualifier p
-          -> Signature p *
-          -> *
+type Args :: forall p . Symbol p * -> Qualifier p -> Qualifier p -> Signature p * -> *
 data Args sym qs ps sig where
     Nil  :: Args sym qs 'None ('Const a)
-    (:*) :: Eta sym rs a
-         -> Args sym (Union qs rs) ps sig
-         -> Args sym qs (Union ps rs) (a ':-> sig)
-    (:~) :: Ev p
-         -> Args sym (p ':. qs) ps sig
-         -> Args sym qs (p ':. ps) (p ':=> sig)
+    (:*) :: Eta sym rs a -> Args sym (Union qs rs) ps sig -> Args sym qs (Union ps rs) (a ':-> sig)
+    (:~) :: Ev p -> Args sym (p ':. qs) ps sig -> Args sym qs (p ':. ps) (p ':=> sig)
 
 infixr :*, :~
 
@@ -74,7 +65,7 @@ match matchSym matchVar = witUniIdent qual |- witSubRefl qual |- flip matchBeta 
     matchBeta (Var n)  as = matchVar n as
     matchBeta (Sym s)  as = matchSym s as
     --matchBeta (b :$ e) as = matchBeta b (e :* as)
-    --matchBeta (b :# p) as = matchBeta b (p :~ as)
+    matchBeta (b :# p) as = matchBeta b (p :~ as)
       -- Subset (Union ps rs) qs
       --   > ps ~ (p?:ps?)
       -- Subset (Union (p?:ps?) rs) qs
