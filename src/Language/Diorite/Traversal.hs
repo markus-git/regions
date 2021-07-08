@@ -40,7 +40,7 @@ infixr :*, :~
 -- | "Pattern match" on a fully applied 'AST' using a function that gets direct
 --   access to the top-most symbol and its sub-trees given as 'Args'.
 match :: forall sym qs a c . (Qual qs)
-    => (forall ps sig .  (a ~ Result sig)
+    => (forall ps sig . (a ~ Result sig)
             => sym sig -> Args sym 'None ps sig -> c ('Const a))
        -- ^ Match on a symbol.
     -> (forall ps rs sig . (a ~ Result sig)
@@ -66,11 +66,13 @@ match matchSym matchVar = witUniIdent qual |- witSubRefl qual |- flip matchBeta 
     matchBeta (Sym s)  as = matchSym s as
     --matchBeta (b :$ e) as = matchBeta b (e :* as)
     matchBeta (b :# p) as = matchBeta b (p :~ as)
-      -- Subset (Union ps rs) qs
+      -- Subset (Union ps rs) qs ~ True
       --   > ps ~ (p?:ps?)
-      -- Subset (Union (p?:ps?) rs) qs
+      -- Subset (Union (p?:ps?) rs) qs ~ True
+      --   > Union 2nd rule.
+      -- Subset (p? : (Union ps? rs)) qs ~ True
       -- ??? 
-      -- Subset (Union ps? (p?:rs)) qs
+      -- Subset (Union ps? (p?:rs)) qs ~ True
 
 --------------------------------------------------------------------------------
 
