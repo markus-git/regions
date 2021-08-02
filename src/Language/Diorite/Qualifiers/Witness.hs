@@ -254,14 +254,51 @@ witSubTrans (QualPred a as) b c Refl Refl
 --------------------------------------------------------------------------------
 -- Subset & Union (SU).
 
---lemSU1 :: Elem a b :~: 'True -> Elem a c :~: 'False -> Subset b c :~: 'False
-lemSU1 = undefined
+lemSU1_1 :: forall a b c . Typeable a => Proxy a -> QualRep b -> QualRep c -> Elem a b :~: 'True -> Elem a c :~: 'False -> Subset b c :~: 'False
+lemSU1_1 _ (QualNone) _ x _ = case x of {}
+lemSU1_1 a (QualPred b bs) c Refl Refl =
+    case test a b of
+        Left  Refl -> Refl
+        Right Refl -> case testElem b c of
+           Left  Refl | Refl <- lemSU1_1 a bs c Refl Refl -> Refl
+           Right Refl -> Refl
+
+lemSU1_2_1 :: forall a b c . Typeable a => Proxy a -> QualRep b -> QualRep c -> Elem a c :~: 'True -> Subset (Remove a b) c :~: Subset b c
+lemSU1_2_1 _ (QualNone) _ _ = Refl
+lemSU1_2_1 a (QualPred b bs) c Refl =
+    case test a b of
+        Left  Refl -> Refl
+        Right Refl -> case testElem b c of
+            Left  Refl | Refl <- lemSU1_2_1 a bs c Refl -> Refl
+            Right Refl -> Refl
+
+lemSU1_2_2 :: forall a b c d . Typeable a => Proxy a -> QualRep b -> QualRep c -> QualRep d -> Elem a d :~: 'True -> Subset (Union b (Remove a c)) d :~: Subset (Union b c) d
+lemSU1_2_2 a (QualNone) c d Refl | Refl <- lemSU1_2_1 a c d Refl = Refl
+lemSU1_2_2 a (QualPred b bs) c d Refl =
+    case testElem b d of
+        Left  Refl | Refl <- witRemOrd b a c, Refl <- lemSU1_2_2 a bs (remove b c) d Refl -> Refl
+        Right Refl -> Refl
+
+lemSU1_2_3 :: forall a b c d . Typeable a => Proxy a -> QualRep b -> QualRep c -> QualRep d -> Elem a d :~: 'True -> Subset (Union b (Remove a (Remove a c))) d :~: Subset (Union b c) d
+lemSU1_2_3 a b c d Refl | Refl <- lemSU1_2_2 a b c d Refl, Refl <- lemSU1_2_2 a b (remove a c) d Refl = Refl
+
+lemSU1_2_4 :: forall a b c d . Typeable a => Proxy a -> QualRep b -> QualRep c -> QualRep d -> Elem a d :~: 'True -> Subset (Union b (Remove a c)) d :~: Subset (Union b (a ':. c)) d
+lemSU1_2_4 a b c d Refl | Refl <- lemSU1_2_3 a b (QualPred a c) d Refl = Refl
+
+lemSU1_2 :: forall a b c d . Typeable a => Proxy a -> QualRep b -> QualRep c -> QualRep d -> Elem a d :~: 'True -> Subset (Union b (Remove a c)) d :~: Subset (Union b (a ':. c)) d
+lemSU1_2 a (QualNone) c d Refl | Refl <- lemSU1_2_1 a c d Refl = Refl
+lemSU1_2 a (QualPred (b :: Proxy q) (bs :: QualRep qs)) c d Refl =
+    case testElem b d of
+        Left  Refl -> case test b a of
+            Left  Refl | Refl <- lemSU1_2_3 a bs c d Refl -> Refl
+            Right Refl | Refl <- witRemOrd b a c, Refl <- lemSU1_2_4 a bs (remove b c) d Refl -> Refl
+        Right Refl -> Refl
 
 witSU1 :: forall a b c d . Typeable a => Proxy a -> QualRep b -> QualRep c -> QualRep d -> Subset (Union (a ':. b) c) d :~: Subset (Union b (a ':. c)) d
-witSU1 a _ _ d =
+witSU1 a b c d =
     case testElem a d of
-        Left  Refl -> undefined -- :: Subset (Union b (Remove a c)) d :~: Subset (Union b (a ':. c)) d
-        Right Refl -> undefined -- :: 'False :~: Subset (Union b (a ':. c)) d
+        Left  Refl | Refl <- lemSU1_2 a b c d Refl -> Refl
+        Right Refl | Refl <- witElemCons a b c, Refl <- lemSU1_1 a (union b (QualPred a c)) d Refl Refl -> Refl 
 --
 -- Needed for:
 --   matchBeta (b :# p) as = matchBeta b (p :~ as)
@@ -275,24 +312,6 @@ witSU1 a _ _ d =
 -- Subset (a : (Union as rs)) qs ~ True
 --   > ??? 
 -- Subset (Union as (a:rs)) qs ~ True
-
---------------------------------------------------------------------------------
-
-lemSU3 :: forall a b c d . Typeable a => Proxy a -> QualRep b -> QualRep c -> QualRep d
-    -> Elem a d :~: 'True -> Subset (Union c b) d :~: 'True -> Subset (Union c (a ':. b)) d :~: 'True
-lemSU3 _ _ (QualNone) _ Refl Refl = Refl
-lemSU3 a b co@(QualPred (c :: Proxy q) cs) d Refl Refl =
-    case test c a of
-        Left  Refl
-            -> undefined
-        Right Refl
-            | Refl :: Subset c (Union c b) :~: 'True <- witSubUni co b
-            , Refl :: Subset c d :~: 'True <- witSubTrans co (union co b) d Refl Refl
-            , Refl :: Elem q d :~: 'True <- witSubElem c cs d Refl
-            -> undefined
-            -- know :: Elem a d
-            --       , Subset (Union (q:qs) b) d
-            -- want :: Subset (Union qs (a:Remove q b)) d
 
 --------------------------------------------------------------------------------
 
