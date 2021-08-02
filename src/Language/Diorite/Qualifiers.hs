@@ -122,27 +122,17 @@ type (:/~:) :: forall k . k -> k -> *
 type (:/~:) a b = (a == b) :~: 'False
 
 -- | Check whether 'a' and 'b' are equal or not.
-test :: forall k (a :: k) (b :: k)
-    .  (Typeable a, Typeable b)
-    => Proxy a
-    -> Proxy b
-    -> Either (a :~: b) (a :/~: b)
-test _ _ =
-    case testEquality (typeRep :: TypeRep a) (typeRep :: TypeRep b) of
-        Just Refl -> Left Refl
-        Nothing   -> Right (Unsafe.unsafeCoerce Refl)
+test :: forall k (a :: k) (b :: k) . (Typeable a, Typeable b) => Proxy a -> Proxy b -> Either (a :~: b) (a :/~: b)
+test _ _ = case testEquality (typeRep :: TypeRep a) (typeRep :: TypeRep b) of
+    Just Refl -> Left Refl
+    Nothing   -> Right (Unsafe.unsafeCoerce Refl)
 
 -- | Check whether 'a' is an "element" of 'b' or not.
-testElem :: forall k (a :: k) (b :: Qualifier k)
-    .  Typeable a
-    => Proxy a
-    -> QualRep b
-    -> Either (Elem a b :~: 'True) (Elem a b :~: 'False)
+testElem :: forall k (a :: k) (b :: Qualifier k) . Typeable a => Proxy a -> QualRep b -> Either (Elem a b :~: 'True) (Elem a b :~: 'False)
 testElem _ (QualNone) = Right Refl
-testElem a (QualPred b bs) =
-    case test a b of
-        Left  Refl -> Left Refl
-        Right Refl -> testElem a bs
+testElem a (QualPred b bs) = case test a b of
+    Left  Refl -> Left Refl
+    Right Refl -> testElem a bs
 
 insert :: Typeable p => Proxy p -> QualRep qs -> QualRep (Insert p qs)
 insert p (QualNone)      = QualPred p QualNone
