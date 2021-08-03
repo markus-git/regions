@@ -10,11 +10,13 @@ module Language.Diorite.Traversal
     ) where
 
 import Language.Diorite.Signatures (Signature(..), Result)
-import Language.Diorite.Qualifiers (Qualifier(..), Union, Subset, QualRep, Qual(..))
-import Language.Diorite.Qualifiers.Witness (witUniIdent, witSubRefl)
+import Language.Diorite.Qualifiers (Qualifier(..), Union, Subset, QualRep(..), Qual(..))
+import Language.Diorite.Qualifiers.Witness (witUniIdent, witSubRefl, witSU1, witSU1')
 import Language.Diorite.Syntax (Name, Ev, Symbol, Beta(..), Eta(..), ASTF, (|-))
 
 -- import qualified Control.Applicative as A
+import Data.Proxy (Proxy)
+import Data.Type.Equality ((:~:)(..))
 
 --------------------------------------------------------------------------------
 -- * Traversal.
@@ -49,7 +51,10 @@ match :: forall sym qs a c . (Qual qs)
     -> ASTF sym qs a
        -- ^ Expression to traverse.
     -> c ('Const a)
-match matchSym matchVar = witUniIdent qual |- witSubRefl qual |- flip matchBeta Nil
+match matchSym matchVar beta =
+    witUniIdent qual |-
+    witSubRefl  qual |-
+    matchBeta beta Nil qual QualNone
   where
     qual :: QualRep qs
     qual = qualifier
@@ -61,18 +66,23 @@ match matchSym matchVar = witUniIdent qual |- witSubRefl qual |- flip matchBeta 
            )
         => Beta sym ps sig
         -> Args sym ps rs sig
+        -> QualRep ps
+        -> QualRep rs
         -> c ('Const a)
-    matchBeta (Var n)  as = matchVar n as
-    matchBeta (Sym s)  as = matchSym s as
-    --matchBeta (b :$ e) as = matchBeta b (e :* as)
-    matchBeta (b :# p) as = matchBeta b (p :~ as)
-      -- Subset (Union ps rs) qs ~ True
-      --   > ps ~ (p?:ps?)
-      -- Subset (Union (p?:ps?) rs) qs ~ True
-      --   > Union 2nd rule.
-      -- Subset (p? : (Union ps? rs)) qs ~ True
-      -- ??? 
-      -- Subset (Union ps? (p?:rs)) qs ~ True
+    matchBeta (Var n)  as _ _ = matchVar n as
+    matchBeta (Sym s)  as _ _ = matchSym s as
+    matchBeta (b :$ e) as ps rs =
+      --
+      -- ???
+      --
+      undefined
+      -- matchBeta b (e :* as) _ _
+    matchBeta (b :# q) as (QualPred (p :: Proxy x) (ps :: QualRep xs)) rs =
+      --
+      (witSU1 p ps rs qual  :: Subset (Union (x ':. xs) rs) qs :~: Subset (Union xs (x ':. rs)) qs) |-
+      (witSU1' p qual ps rs :: Subset qs (Union (x ':. xs) rs) :~: Subset qs (Union xs (x ':. rs))) |-
+      --
+      matchBeta b (q :~ as) ps (QualPred p rs)
 
 --------------------------------------------------------------------------------
 
