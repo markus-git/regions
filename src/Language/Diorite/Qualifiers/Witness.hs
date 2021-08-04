@@ -354,6 +354,11 @@ witSU1' a (QualPred b bs) c d =
 
 --------------------------------------------------------------------------------
 
+witSU2 :: forall a b . Q a -> Q b -> Subset (Difference (Union a b) b) a :~: 'True
+witSU2 = undefined
+
+--------------------------------------------------------------------------------
+
 -- witSUExt :: forall a b c . Q a -> Q b -> Q c -> Subset b c :~: 'True -> Subset b (Union a c) :~: 'True
 -- witSUExt _ (QualNone) _ _ = Refl
 -- witSUExt a (QualPred (b :: P q) (bs :: Q qs)) c Refl
