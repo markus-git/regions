@@ -29,6 +29,7 @@ import Data.Typeable (Typeable, eqT)
 --------------------------------------------------------------------------------
 
 -- | Signature of a symbol.
+type Signature :: * -> * -> *
 data Signature p a =
       Const a
     | Signature p a :-> Signature p a

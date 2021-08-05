@@ -21,7 +21,7 @@ module Language.Diorite.Syntax
     , lam
     , elam
     -- * "Smart" constructors.
-    , Exists
+    , Exists(..)
     , Ex(..)
     , SmartBeta
     , SmartSig
@@ -70,7 +70,7 @@ type Symbol p a = Signature p a -> a
 type Beta :: forall p . Symbol p * -> Qualifier p -> Signature p * -> *
 data Beta sym qs sig where
     -- ^ Variable.
-    Var   :: Sig sig => Name -> Beta sym qs sig
+    Var   :: (Qual qs, Sig sig) => Name -> Beta sym qs sig
     -- ^ Symbol.
     Sym   :: sym sig -> Beta sym 'None sig
     -- ^ Application.
@@ -145,6 +145,7 @@ elam f = Ev v :\\ body
 -- ** "Smart" constructors.
 
 -- | ...
+type Exists :: * -> *
 data Exists p = Empty | Fun (Exists p) (Exists p) | Pre p (Exists p)
 -- note: Since existential quantification isn't really a thing in Haskell I have
 --       these 'Exists' like types to distribute qualifiers. Not sure what a

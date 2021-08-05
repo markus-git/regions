@@ -38,9 +38,8 @@ import qualified Unsafe.Coerce as Unsafe (unsafeCoerce)
 --------------------------------------------------------------------------------
 
 -- | Collection of predicates.
-data Qualifier p =
-      None
-    | p :. Qualifier p
+type Qualifier :: * -> *
+data Qualifier p = None | p :. Qualifier p
 
 infixr 2 :.
 
