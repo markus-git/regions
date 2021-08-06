@@ -14,7 +14,8 @@ module Language.Diorite.Qualifiers
     , Difference
     , Elem
     , Subset
-    , type (>=)
+--  , type (>=)
+--  , type (~=)
     -- ** ...
     , QualRep(..)
     , Qual(..)
@@ -76,8 +77,8 @@ type family Union ps qs where
 -- | Remove any predicates in the second set of qualifiers from the first set.
 type Difference :: forall p . Qualifier p -> Qualifier p -> Qualifier p
 type family Difference ps qs where
-  Difference ps ('None)    = ps
-  Difference ps (q ':. qs) = Difference (Remove q ps) qs
+    Difference ps ('None)    = ps
+    Difference ps (q ':. qs) = Difference (Remove q ps) qs
 
 -- | Check if a predicate is part of a set of qualifiers.
 type Elem :: forall p . p -> Qualifier p -> Bool
@@ -91,8 +92,8 @@ type family Subset ps qs where
     Subset ('None)    qs = 'True
     Subset (p ':. ps) qs = If (Elem p qs) (Subset ps qs) 'False
 
--- | ...
-type qs >= ps = (Subset ps qs ~ 'True)
+-- type qs >= ps = (Subset ps qs ~ 'True)
+-- type qs ~= ps = (Subset ps qs ~ 'True, Subset qs ps ~ 'True)
 
 --------------------------------------------------------------------------------
 -- ** Rep. of a valid qualifier.

@@ -19,7 +19,7 @@ module Language.Diorite.Signatures
     , witTypeable
     ) where
 
-import Data.Constraint (Dict(..))
+import Data.Constraint (Dict(..), Constraint)
 import Data.Proxy (Proxy(..))
 import Data.Type.Equality ((:~:)(..))
 import Data.Typeable (Typeable, eqT)
@@ -62,6 +62,7 @@ data SigRep sig where
     SigPred  :: Typeable p => Proxy p -> SigRep sig -> SigRep (p ':=> sig)
 
 -- | Valid symbol signatures.
+type  Sig :: forall p . Signature p * -> Constraint
 class Sig sig where
     signature :: SigRep sig
 
@@ -109,13 +110,13 @@ testSig (SigPred (_ :: Proxy x) a1) (SigPred (_ :: Proxy y) a2)
     = Just Refl
 testSig _ _ = Nothing
 
--- | Any witness of a symbol signature is a valid symbol signature.
+-- | Any rep. of a symbol signature is a valid symbol signature.
 witSig :: SigRep a -> Dict (Sig a)
 witSig (SigConst)    = Dict
 witSig (SigPart a b) | Dict <- witSig a, Dict <- witSig b = Dict
 witSig (SigPred _ a) | Dict <- witSig a = Dict
 
--- | Any witness of a constant symbol signature is typeable.
+-- | Any rep. of a constant symbol type is typeable.
 witTypeable :: SigRep ('Const a) -> Dict (Typeable a)
 witTypeable (SigConst) = Dict
 

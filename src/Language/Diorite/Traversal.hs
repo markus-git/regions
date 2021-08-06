@@ -6,6 +6,7 @@ module Language.Diorite.Traversal
     (
     -- * "Pattern matching" on ASTs.
       Args(..)
+    , SmartApply
     , match
     , constMatch
     , transMatch
@@ -24,7 +25,7 @@ import qualified Control.Applicative as A
 -- | ...
 type QualArgs :: * -> *
 data QualArgs p = Empty | Fun (Qualifier p) (QualArgs p) | Pre p (QualArgs p)
--- todo: this is basically the "spine" of 'Exists'.
+-- todo: this is basically the "spine" of 'Exists', could make an 'Ex a p'.
 
 -- | List of a symbol's arguments.
 type Args :: forall p . Symbol p * -> QualArgs p -> Signature p * -> *
@@ -47,7 +48,9 @@ type family SmartApply qs ex where
 -- | \"Pattern match\" on a fully applied 'AST' using:
 --   1. a \"symbol\" function that gets direct access to the top-most symbol and
 --      its sub-trees given as 'Args'.
---   2. a \"variable\" function ...
+--   2. a \"variable\" function that gets the top-most symbol's name, a
+--      repersentation of the symbol's constraints, and its sub-trees given as
+--      'Args'.
 match :: forall p sym qs a (c :: Signature p * -> *)
     . (forall ps sig . (a ~ Result sig, qs ~ SmartApply 'None ps)
             => sym sig -> Args sym ps sig -> c ('Const a))

@@ -6,15 +6,17 @@ module Language.Diorite.Region.Annotate
     (
     ) where
 
-import Language.Diorite.Signatures (Signature, Result, SigRep(..))
-import Language.Diorite.Qualifiers (Qualifier(..), type (==), If, Remove, Union, Difference, QualRep(..), Qual(..))
-import Language.Diorite.Syntax (Name, Ev(..), Symbol, Beta(..), Eta(..), AST, ASTF, elam, (:+:)(..), (:<:)(..))
-import Language.Diorite.Traversal (Args(..), constMatch)
+import Language.Diorite.Signatures (Signature, Result, SigRep(..), Sig(..))
+import Language.Diorite.Qualifiers
+import qualified Language.Diorite.Qualifiers.Witness as W
+import Language.Diorite.Syntax
+import Language.Diorite.Traversal (Args(..), SmartApply, constMatch)
 import qualified Language.Diorite.Signatures as S (Signature(..))
 
 import Data.Constraint (Constraint)
 import Data.Proxy (Proxy(..))
 import Data.Type.Equality ((:~:)(..))
+import Data.Typeable (Typeable)
 
 --------------------------------------------------------------------------------
 -- What we (sorta) have:
@@ -42,7 +44,9 @@ import Data.Type.Equality ((:~:)(..))
 -- > t ::= a | t -> t | p => t | t ^ Put r
 
 --------------------------------------------------------------------------------
--- Term-level stuff.
+
+--------------------------------------------------------------------------------
+-- * ...
 
 -- | Kind for 'Put' predicates, which assert that a region 'r' is allocated.
 data Put r = Put r
@@ -56,7 +60,8 @@ type Rgn :: forall r . Signature (Put r) * -> *
 data Rgn sig where
     Local :: Rgn (('Put r 'S.:=> 'S.Const a) 'S.:-> 'S.Const a)
     At    :: Rgn ('Put r 'S.:=> a 'S.:-> sig)
--- todo: 'Put r' here really limits the choice for predicates.
+-- todo: 'Put r' kind here really limits the choice of qualifiers. Ideally, some
+--       compositional variant a la "Put r :<: p" could be used instead.
 
 -- | Introduce a local binding for place associated with region 'r'.
 local :: forall sym r qs a
@@ -86,19 +91,23 @@ atEta :: forall sym r qs sig
 atEta ast p = (inj At :: AST sym 'None ('Put r 'S.:=> sig 'S.:-> sig)) :# p :$ ast
 
 --------------------------------------------------------------------------------
--- Type-level stuff.
+-- * ...
 
 -- | Signature with region labels.
+type Label :: * -> * -> *
 data Label r a =
       Const a
     | Label r a :-> Label r a
     | Put r :=> Label r a
     | Label r a :^ r
+-- todo: I put 'Put r' for ':=>' so that I could use just 'r' for ':^', not yet
+--       sure if this is a good idea.. Constraints are already limited and this
+--       doesn't help.
 
 infixr 2 :->, :=>
 infixl 1 :^
 
--- | Stip any region labels from a signature.
+-- | Strip any region labels from a signature.
 type Strip :: forall r . Label r * -> Signature (Put r) *
 type family Strip sig where
     Strip ('Const a) = 'S.Const a
@@ -106,37 +115,85 @@ type family Strip sig where
     Strip (p ':=> a) = p 'S.:=> Strip a
     Strip (a ':^ _)  = Strip a
 
+-- | ...
+type Dress :: forall r . Signature (Put r) * -> Label r *
+type family Dress sig where
+    Dress ('S.Const a) = 'Const a
+    Dress (a 'S.:-> b) = Dress a ':-> Dress b
+    Dress (p 'S.:=> a) = p ':=> Dress a
+
+--------------------------------------------------------------------------------
+-- ** Rep. of ...
+
 -- | Witness of a labelled symbol signature.
 type LblRep :: forall r . Label r * -> *
 data LblRep l where
-    LblConst :: LblRep ('Const a)
+    LblConst :: Typeable a => LblRep ('Const a)
     LblPart  :: LblRep a -> LblRep sig -> LblRep (a ':-> sig)
-    LblPred  :: Proxy ('Put r) -> LblRep sig -> LblRep ('Put r ':=> sig)
+    LblPred  :: Typeable p => Proxy p -> LblRep sig -> LblRep (p ':=> sig)
     LblAt    :: Proxy r -> LblRep sig -> LblRep (sig ':^ r)
+
+-- | ...
+type  Lbl :: forall r . Label r * -> Constraint
+class Lbl lbl where
+    label :: LblRep lbl
+
+--------------------------------------------------------------------------------
+-- ** ...
+
+strip :: forall r (lbl :: Label r *) . Typeable r => LblRep lbl -> SigRep (Strip lbl)
+strip (LblConst)      = SigConst
+strip (LblPart a lbl) = SigPart (strip a) (strip lbl)
+strip (LblPred p lbl) = SigPred p (strip lbl)
+strip (LblAt _ lbl)   = strip lbl
+
+dress :: forall r (sig :: Signature (Put r) *) . SigRep sig -> LblRep (Dress sig)
+dress (SigConst)      = LblConst
+dress (SigPart a sig) = LblPart (dress a) (dress sig)
+dress (SigPred p sig) = LblPred p (dress sig)
+
+witSDIso :: forall r (sig :: Signature (Put r) *) . SigRep sig -> Strip (Dress sig) :~: sig
+witSDIso (SigConst) = Refl
+witSDIso (SigPart a b) | Refl <- witSDIso a, Refl <- witSDIso b = Refl
+witSDIso (SigPred _ a) | Refl <- witSDIso a = Refl
+
+--------------------------------------------------------------------------------
+-- ** ...
 
 -- | Witness of equality between a symbol's signature and its erased annotation.
 newtype lbl :~~: sig = Stripped (Strip lbl :~: sig)
 infixr :~~:
 
-type LBeta sym qs sig l = (Beta sym qs sig, LblRep l, l :~~: sig)
-type LEta  sym qs sig l = (Eta  sym qs sig, LblRep l, l :~~: sig)
+newtype LBeta sym qs sig l = LBeta (Beta sym qs sig, LblRep l, l :~~: sig)
+newtype LEta  sym qs sig l = LEta  (Eta  sym qs sig, LblRep l, l :~~: sig)
 
+localL :: forall sym r qs a l
+    .  (Rgn :<: sym)
+    => LBeta sym ('Put r ':. qs) ('S.Const a) l
+    -> Place r
+    -> LBeta sym qs ('S.Const a) l
+localL (LBeta (ast, t, Stripped Refl)) p =
+    LBeta (local ast p, t, Stripped Refl)
+  
 atBetaL :: forall sym r qs a l
     .  (Rgn :<: sym, Remove ('Put r) qs ~ qs)
     => LBeta sym qs ('S.Const a) l
     -> Place r
     -> LBeta sym ('Put r ':. qs) ('S.Const a) (l ':^ r)
-atBetaL (ast, t, Stripped Refl) p = (atBeta ast p, LblAt Proxy t, Stripped Refl)
--- todo: Not sure if 'atBetaL' and 'atEtaL' should have a 'Place r' argument or
---       produce an AST which expects a 'Place r'. Also not sure if building a
---       'LblRep' alongside the labelled 'Beta' and 'Eta' is necessary yet.
+atBetaL (LBeta (ast, t, Stripped Refl)) p =
+    LBeta (atBeta ast p, LblAt Proxy t, Stripped Refl)
+-- todo: not sure if 'atBetaL' and 'atEtaL' should have a 'Place r' argument or
+--       produce an AST which expects a 'Place r'.
+-- todo: also not sure if building a 'LblRep' alongside the labelled 'Beta' and
+--       'Eta' is necessary yet.
 
 atEtaL :: forall sym r qs sig l
     .  (Rgn :<: sym, Remove ('Put r) qs ~ qs)
     => LEta sym qs sig l
     -> Place r
     -> LBeta sym ('Put r ':. qs) sig (l ':^ r)
-atEtaL (ast, t, Stripped Refl) p = (atEta ast p, LblAt Proxy t, Stripped Refl)
+atEtaL (LEta (ast, t, Stripped Refl)) p =
+    LBeta (atEta ast p, LblAt Proxy t, Stripped Refl)
 
 --------------------------------------------------------------------------------
 -- When annotating an 'ASTF q a' only the result 'a' is visible, so we cannot
@@ -144,57 +201,78 @@ atEtaL (ast, t, Stripped Refl) p = (atEta ast p, LblAt Proxy t, Stripped Refl)
 --
 -- So I (sorta) need something like:
 --
--- > annotate :: ASTF q a -> exists p b. LASTF (p >= q) (Strip b ~ a)
+-- > annotate :: ASTF q a -> exists p b. LASTF p b where (p >= q) (Strip b ~ a)
 --
--- Here P >= Q means that P implies everything in Q and Strip removes all
--- annotations from a signature.
-
+-- Since I treat qualifiers like a set, P >= Q means that P is a subset of Q.
+-- Strip simply removes all annotations from a signature and indicates that
+-- we havent altered the original programs "meaning".
 --------------------------------------------------------------------------------
--- Constraint stuff.
 
-type Elem :: forall p . p -> Qualifier p -> Bool
-type family Elem p qs where
-    Elem p ('None)    = 'False
-    Elem p (q ':. qs) = If (p == q) 'True (Elem p qs)
-
-type Subset :: forall p . Qualifier p -> Qualifier p -> Bool
-type family Subset ps qs where
-    Subset ('None)    qs = 'True
-    Subset (p ':. ps) qs = If (Elem p qs) (Subset ps qs) 'False
-
-class (Subset ps qs ~ True) => (>=) ps qs
+class    (Subset ps qs ~ True) => (>=) ps qs
 instance (Subset ps qs ~ True) => (>=) ps qs
 
-class (Strip b ~ a) => (~~) a b
-instance (Strip b ~ a) => (~~) a b
+data ExLAST c sym p sig where
+    Ex :: (p qs, Strip l ~ sig)
+       => c sym qs sig l
+       -> ExLAST c sym p sig
 
---------------------------------------------------------------------------------
--- Ex-Beta stuff.
+-- type LBeta sym qs sig l = (Beta sym qs sig, LblRep l, l :~~: sig)
+-- type LEta  sym qs sig l = (Eta  sym qs sig, LblRep l, l :~~: sig)
 
-type EBeta :: forall r
-    .  (Symbol (Put r) *)
-    -> (Qualifier (Put r) -> Constraint)
-    -> (Label r * -> Constraint)
-    -> *
-data EBeta sym p q where
-    Ex :: (p qs, q l) => LBeta sym qs sig l -> EBeta sym p q
---type LBeta sym qs sig l = (Beta sym qs sig, LblRep l, l :~~: sig)
---type LEta  sym qs sig l = (Eta  sym qs sig, LblRep l, l :~~: sig)
+type ExLBeta = ExLAST LBeta
+type ExLEta  = ExLAST LEta
 
-annotateSym :: a ~ Result sig
-    => sym sig
-    -> QualRep qs
-    -> Args sym 'None sig
-    -> EBeta sym ((>=) qs) ((~~) ('S.Const a))
-annotateSym sym qs (Nil)     = undefined
-annotateSym sym qs (e :* as) = undefined
-annotateSym sym qs (p :~ as) = undefined
+type ExLASTF sym p a = ExLBeta sym p ('S.Const a)
 
-annotate ::
-       Qual qs
-    => Beta sym qs ('S.Const a)
-    -> EBeta sym ((>=) qs) ((~~) ('S.Const a))
-annotate = constMatch (\sym as -> annotateSym sym qualifier as) undefined
+annotateBeta :: forall sym qs ps rs sig a
+    .  ( Sym sym
+       , a ~ Result sig
+       , qs ~ SmartApply ps rs
+       )
+    => Beta sym ps sig
+    -> Args sym rs sig
+    -> ExLASTF sym ((>=) qs) a
+annotateBeta b (Nil)
+    | Refl <- W.witSubRefl (undefined :: QualRep ps)
+    = Ex (LBeta ( b
+                , dress (symbol (undefined :: sym sig))
+                , Stripped Refl))
+annotateBeta b (e :* as)
+    = let e' = annotateEta e in
+      case annotateBeta (b :$ undefined) as of
+          Ex (LBeta (b', lb, Stripped Refl)) ->
+              undefined
+annotateBeta b (p :~ as)
+    = undefined
+
+annotateEta :: forall r (sym :: Symbol (Put r) *) (ps :: Qualifier (Put r)) sig
+    .  ( Sym sym
+       )
+    => Eta sym ps sig
+    -> ExLEta sym ((>=) ps) sig
+annotateEta (Spine b)
+  | Ex (LBeta (b', l, Stripped Refl)) <- annotate b = 
+    Ex (LEta (Spine b', l, Stripped Refl))
+annotateEta (n :\ e)
+  | Ex (LEta (e', l, Stripped Refl)) <- annotateEta e =
+    let a = arg (Proxy :: Proxy sig) in
+    witSDIso a |-
+    Ex (LEta (n :\ e', LblPart (dress a) l, Stripped Refl))
+  where
+    arg :: Sig a => Proxy (a 'S.:-> b) -> SigRep a
+    arg _ = signature
+annotateEta (p :\\ e)
+  | Ex (LEta (e', l, Stripped Refl)) <- annotateEta e =
+    Ex (LEta (p :\\ _ e', LblPred Proxy l, Stripped Refl))
+-- e ~ Eta _ (q : qs) _
+-- l ~ ? >= (q : qs)
+-- ret : ? >= qs
+--
+-- ! Eta has wrong form on its quals. !
+-- Either re-arrange quals. to fit rule or change the rule's constraint.
+
+annotate :: Sym sym => ASTF sym qs a -> ExLASTF sym ((>=) qs) a
+annotate = constMatch undefined undefined
 
 --------------------------------------------------------------------------------
 -- Fin.
