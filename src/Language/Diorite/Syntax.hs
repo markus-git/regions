@@ -85,7 +85,10 @@ data Eta sym qs sig where
     -- ^ Abstraction.
     (:\)  :: Sig a => Name -> Eta sym qs sig -> Eta sym qs (a ':-> sig)
     -- ^ Evidence-abstraction.
-    (:\\) :: Ev q -> Eta sym (q ':. qs) sig -> Eta sym qs (q ':=> sig)
+--  (:\\) :: Ev q -> Eta sym (q ':. qs) sig -> Eta sym qs (q ':=> sig) 
+    (:\\) :: Elem q qs ~ 'True => Ev q -> Eta sym qs sig -> Eta sym (Remove q qs) (q ':=> sig)
+-- note: old rule for evidence-abstraction was too strict for quals. like
+--       '((>=) ps)' used in region annotation.
 
 infixl 1 :$, :#
 infixr 9 :\, :\\

@@ -40,6 +40,8 @@ import qualified Unsafe.Coerce as Unsafe (unsafeCoerce)
 -- witSubElem       :: Subset (a ':. b) c :~: 'True -> Elem a c :~: 'True
 -- witSubRem        :: Subset (a ':. b) c :~: 'True -> Subset b c :~: 'True
 -- witSubRemove     :: Elem a c :~: 'True -> Subset (Remove a b) c :~: Subset b c
+-- witSubRemove'    :: Elem a b :~: 'False -> Subset b (Remove a c) :~: Subset b c
+-- witSubShrink     :: Elem a (Remove a b) :~: 'False -> Elem a c :~: 'True -> Subset (Remove a b) (Remove a c) :~: Subset b c
 -- witSubIn         :: Subset a b :~: 'True -> Elem c a :~: 'True -> Elem c b :~: 'True
 -- witSubNotIn      :: Elem a b :~: 'True -> Elem a c :~: 'False -> Subset b c :~: 'False
 -- witSubCons       :: Subset b c :~: 'True -> Subset b (a ':. c) :~: 'True
@@ -231,6 +233,29 @@ witSubRemove a (QualPred b bs) c Refl =
             Right Refl -> Refl
 {-# NOINLINE witSubRemove #-}
 {-# RULES "witSubRemove" forall a b c . witSubRemove a b c Refl = Unsafe.unsafeCoerce Refl #-}
+
+witSubRemove' :: forall a b c . T a => P a -> Q b -> Q c -> Elem a b :~: 'False -> Subset b (Remove a c) :~: Subset b c
+witSubRemove' _ (QualNone) _ _ = Refl
+witSubRemove' a (QualPred b bs) c Refl
+    | Refl <- lem b bs Refl
+    , Refl <- witEqRefl b a
+    , Refl <- witElemRemove b a c Refl
+    = case testElem b c of
+          Left  Refl | Refl <- witSubRemove' a bs c Refl -> Refl
+          Right Refl -> Refl
+  where
+    lem :: forall d e . T d => P d -> Q e -> Elem a (d ':. e) :~: 'False -> a :/~: d
+    lem d _ Refl =
+        case test a d of
+            Left  x    -> case x of {}
+            Right Refl -> Refl
+{-# NOINLINE witSubRemove' #-}
+{-# RULES "witSubRemove'" forall a b c . witSubRemove' a b c Refl = Unsafe.unsafeCoerce Refl #-}
+
+witSubShrink :: forall a b c . T a => P a -> Q b -> Q c -> Elem a (Remove a b) :~: 'False -> Elem a c :~: 'True -> Subset (Remove a b) (Remove a c) :~: Subset b c
+witSubShrink a b c Refl Refl | Refl <- witSubRemove a b c Refl, Refl <- witSubRemove' a (remove a b) c Refl = Refl
+{-# NOINLINE witSubShrink #-}
+{-# RULES "witSubShrink" forall a b c . witSubShrink a b c Refl Refl = Unsafe.unsafeCoerce Refl #-}
 
 witSubIn :: forall a b c . T c => Q a -> Q b -> P c -> Subset a b :~: 'True -> Elem c a :~: 'True -> Elem c b :~: 'True
 witSubIn (QualPred a as) b c Refl Refl =

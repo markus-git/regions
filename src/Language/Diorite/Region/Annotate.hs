@@ -1,6 +1,7 @@
 --{-# OPTIONS_GHC -Wall #-}
 
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Language.Diorite.Region.Annotate
     (
@@ -13,7 +14,7 @@ import Language.Diorite.Syntax
 import Language.Diorite.Traversal (Args(..), SmartApply, constMatch)
 import qualified Language.Diorite.Signatures as S (Signature(..))
 
-import Data.Constraint (Constraint)
+import Data.Constraint (Constraint, Dict(..))
 import Data.Proxy (Proxy(..))
 import Data.Type.Equality ((:~:)(..))
 import Data.Typeable (Typeable)
@@ -157,6 +158,8 @@ witSDIso (SigConst) = Refl
 witSDIso (SigPart a b) | Refl <- witSDIso a, Refl <- witSDIso b = Refl
 witSDIso (SigPred _ a) | Refl <- witSDIso a = Refl
 
+--removeL :: Proxy q -> LblRep lbl -> LblRep (Remove q lbl)
+
 --------------------------------------------------------------------------------
 -- ** ...
 
@@ -253,23 +256,36 @@ annotateEta :: forall r (sym :: Symbol (Put r) *) (ps :: Qualifier (Put r)) sig
 annotateEta (Spine b)
   | Ex (LBeta (b', l, Stripped Refl)) <- annotate b = 
     Ex (LEta (Spine b', l, Stripped Refl))
-annotateEta (n :\ e)
+annotateEta (n :\ (e :: Eta sym qs a))
   | Ex (LEta (e', l, Stripped Refl)) <- annotateEta e =
     let a = arg (Proxy :: Proxy sig) in
     witSDIso a |-
+    --let (e'' :: Eta sym qs sig) = n :\ e' in
+    --undefined
     Ex (LEta (n :\ e', LblPart (dress a) l, Stripped Refl))
   where
-    arg :: Sig a => Proxy (a 'S.:-> b) -> SigRep a
+    arg :: forall a b . Sig a => Proxy (a 'S.:-> b) -> SigRep a
     arg _ = signature
-annotateEta (p :\\ e)
-  | Ex (LEta (e', l, Stripped Refl)) <- annotateEta e =
-    Ex (LEta (p :\\ _ e', LblPred Proxy l, Stripped Refl))
--- e ~ Eta _ (q : qs) _
--- l ~ ? >= (q : qs)
--- ret : ? >= qs
---
--- ! Eta has wrong form on its quals. !
--- Either re-arrange quals. to fit rule or change the rule's constraint.
+-- note: https://ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/type_applications.html#type-applications-in-patterns
+annotateEta ((p :: Ev q) :\\ (e :: Eta sym qs a))
+  | Ex (LEta ((e' :: Eta sym xs a), (l :: LblRep l), Stripped Refl)) <- annotateEta e
+  , (Refl :: Elem q qs :~: 'True) <- Refl
+  , (Refl :: Subset qs xs :~: 'True) <- Refl
+  , (Dict :: Dict (Typeable q)) <- undefined
+  , (Refl :: Elem q xs :~: 'True) <- W.witSubIn
+        (undefined :: QualRep qs)
+        (undefined :: QualRep xs)
+        (undefined :: Proxy q) Refl Refl
+  , (Refl :: Subset (Remove q qs) (Remove q xs) :~: 'True) <- W.witSubShrink
+        (undefined :: Proxy q)
+        (undefined :: QualRep qs)
+        (undefined :: QualRep xs)
+        (undefined :: Elem q (Remove q qs) :~: 'False)
+        Refl
+  = let (e'' :: Eta sym (Remove q xs) (q 'S.:=> a)) = p :\\ e' in
+    let (l'  :: LblRep (q ':=> l)) = LblPred Proxy l in
+    let (r   :: (q ':=> l) :~~: (q 'S.:=> a)) = Stripped Refl in
+    Ex (LEta (e'', l', r))
 
 annotate :: Sym sym => ASTF sym qs a -> ExLASTF sym ((>=) qs) a
 annotate = constMatch undefined undefined
