@@ -14,6 +14,8 @@ module Language.Diorite.Qualifiers
     , Difference
     , Elem
     , Subset
+    , Extends
+--  , Set
 --  , type (>=)
 --  , type (~=)
     -- ** ...
@@ -94,6 +96,12 @@ type Subset :: forall p . Qualifier p -> Qualifier p -> Bool
 type family Subset ps qs where
     Subset ('None)    qs = 'True
     Subset (p ':. ps) qs = If (Elem p qs) (Subset ps qs) 'False
+
+-- | ...
+type Extends :: forall p . Qualifier p -> Qualifier p -> Bool
+type family Extends ps qs where
+    Extends ('None)    _  = 'True
+    Extends (p ':. ps) qs = If (Elem p qs) (Extends ps (Remove p qs)) 'False
 
 -- | ...
 type Set :: forall p . Qualifier p -> Bool

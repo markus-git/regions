@@ -39,10 +39,11 @@ import qualified Unsafe.Coerce as Unsafe (unsafeCoerce)
 -- > Subset:
 -- witSubElem       :: Subset (a ':. b) c :~: 'True -> Elem a c :~: 'True
 -- witSubRem        :: Subset (a ':. b) c :~: 'True -> Subset b c :~: 'True
+-- witSubAdd        :: Subset b (Remove a c) :~: 'True -> Subset b c :~: 'True
 -- witSubRemove     :: Elem a c :~: 'True -> Subset (Remove a b) c :~: Subset b c
 -- witSubRemove'    :: Elem a b :~: 'False -> Subset b (Remove a c) :~: Subset b c
 -- witSubShrink     :: Elem a (Remove a b) :~: 'False -> Elem a c :~: 'True -> Subset (Remove a b) (Remove a c) :~: Subset b c
--- witSubIn         :: Subset a b :~: 'True -> Elem c a :~: 'True -> Elem c b :~: 'True
+-- witSubIn         :: Subset b c :~: 'True -> Elem a b :~: 'True -> Elem a c :~: 'True
 -- witSubNotIn      :: Elem a b :~: 'True -> Elem a c :~: 'False -> Subset b c :~: 'False
 -- witSubCons       :: Subset b c :~: 'True -> Subset b (a ':. c) :~: 'True
 -- witSubRefl       :: Subset a a :~: 'True
@@ -213,6 +214,15 @@ witSubRem a b c Refl | Refl <- witSubElem a b c Refl = Refl
 {-# NOINLINE witSubRem #-}
 {-# RULES "witSubRem" forall a b c . witSubRem a b c Refl = Unsafe.unsafeCoerce Refl #-}
 
+witSubAdd :: forall a b c . T a => P a -> Q b -> Q c -> Subset b (Remove a c) :~: 'True -> Subset b c :~: 'True
+witSubAdd _ (QualNone) _ _ = Refl
+witSubAdd a (QualPred b bs) c Refl =
+    case testElem b c of
+        Left  Refl | Refl <- witSubRem b bs (remove a c) Refl, Refl <- witSubAdd a bs c Refl -> Refl
+        Right x    -> case x of {}
+{-# NOINLINE witSubAdd #-}
+{-# RULES "witSubAdd" forall a b c . witSubAdd a b c Refl = Unsafe.unsafeCoerce Refl #-}
+
 -- witSubRemove :: forall a b c . T a => P a -> Q b -> Q c -> Subset b c :~: 'True -> Subset (Remove a b) c :~: 'True
 -- witSubRemove _ (QualNone) _ Refl = Refl
 -- witSubRemove a (QualPred b bs) c Refl =
@@ -257,11 +267,11 @@ witSubShrink a b c Refl Refl | Refl <- witSubRemove a b c Refl, Refl <- witSubRe
 {-# NOINLINE witSubShrink #-}
 {-# RULES "witSubShrink" forall a b c . witSubShrink a b c Refl Refl = Unsafe.unsafeCoerce Refl #-}
 
-witSubIn :: forall a b c . T c => Q a -> Q b -> P c -> Subset a b :~: 'True -> Elem c a :~: 'True -> Elem c b :~: 'True
-witSubIn (QualPred a as) b c Refl Refl =
-    case test c a of
-        Left  Refl | Refl <- witSubElem a as b Refl -> Refl
-        Right Refl | Refl <- witSubRem a as b Refl, Refl <- witSubIn as b c Refl Refl -> Refl
+witSubIn :: forall a b c . T a => P a -> Q b -> Q c -> Subset b c :~: 'True -> Elem a b :~: 'True -> Elem a c :~: 'True
+witSubIn a (QualPred b bs) c Refl Refl =
+    case test a b of
+        Left  Refl | Refl <- witSubElem b bs c Refl -> Refl
+        Right Refl | Refl <- witSubRem b bs c Refl, Refl <- witSubIn a bs c Refl Refl -> Refl
 {-# NOINLINE witSubIn #-}
 {-# RULES "witSubIn" forall a b c . witSubIn a b c Refl Refl = Unsafe.unsafeCoerce Refl #-}
 
@@ -306,11 +316,66 @@ witSubTrans :: forall a b c . Q a -> Q b -> Q c -> Subset a b :~: 'True -> Subse
 witSubTrans (QualNone) _ _ _ _ = Refl
 witSubTrans (QualPred a as) b c Refl Refl
     | Refl <- witSubElem a as b Refl
-    , Refl <- witSubIn b c a Refl Refl
+    , Refl <- witSubIn a b c Refl Refl
     , Refl <- witSubTrans as b c Refl Refl
     = Refl
 {-# NOINLINE witSubTrans #-}
 {-# RULES "witSubTrans" forall a b c . witSubTrans a b c Refl Refl = Unsafe.unsafeCoerce Refl #-}
+
+--------------------------------------------------------------------------------
+-- Extends.
+
+witExtRefl :: forall a . Q a -> Extends a a :~: 'True
+witExtRefl (QualNone) = Refl
+witExtRefl (QualPred a as) | Refl <- witExtRefl as = Refl
+
+witExtNotIn :: forall a b c . T a => P a -> Q b -> Q c -> Elem a b :~: 'True -> Elem a c :~: 'False -> Extends b c :~: 'False
+witExtNotIn _ (QualNone) _ x _ = case x of {}
+witExtNotIn a (QualPred b bs) c Refl Refl =
+    case testElem b c of
+        Left  Refl -> case test a b of
+            Left  Refl -> Refl
+            Right Refl | Refl <- witElemRemove a b c Refl , Refl <- witExtNotIn a bs (remove b c) Refl Refl -> Refl
+        Right Refl -> Refl
+
+witExtSub :: forall a b . Q a -> Q b -> Extends a b :~: 'True -> Subset a b :~: 'True
+witExtSub (QualNone) _ _ = Refl
+witExtSub (QualPred (a :: Proxy q) (as :: QualRep qs)) b Refl =
+    case testElem a b of
+        Left  Refl | Refl <- witExtSub as (remove a b) Refl, Refl <- witSubAdd a as b Refl -> Refl
+        Right x    -> case x of {}
+
+witExtElem :: forall a b c . T a => P a -> Q b -> Q c -> Extends (a ':. b) c :~: 'True -> Elem a c :~: 'True
+witExtElem a b c Refl | Refl <- witExtSub (QualPred a b) c Refl, Refl <- witSubElem a b c Refl = Refl
+
+witExtRem :: forall a b c . T a => P a -> Q b -> Q c -> Extends (a ':. b) c :~: 'True -> Extends b c :~: 'True
+witExtRem _ (QualNone) _ _ = Refl
+witExtRem a (QualPred b bs) c Refl =
+    case testElem b c of
+        -- Extends (a ':. q ':. qs) c :~: 'True
+        -- Elem q c :~: 'True
+        -- _ :: Extends qs (Remove q c) :~: 'True
+        Left  Refl -> undefined
+        Right x    -> case x of {}
+
+witExtShrink :: forall a b c . T a => P a -> Q b -> Q c -> Extends (Remove a b) (Remove a c) :~: Extends b c
+witExtShrink _ (QualNone) _ = Refl
+witExtShrink a (QualPred b bs) c =
+    case test a b of
+        Left  Refl -> case testElem a c of
+            Left  Refl -> Refl
+            -- a ~ b -> Elem a b ~ True
+            -- Elem a c ~ False
+            Right Refl -> undefined
+        Right Refl | Refl <- witEqRefl a b, Refl <- witElemRemove b a c Refl -> case testElem b c of
+            Left  Refl | Refl <- witRemOrd a b c, Refl <- witExtShrink a bs (remove b c) -> Refl
+            Right Refl -> Refl
+
+witExtIn :: forall a b c . T a => P a -> Q b -> Q c -> Extends b c :~: 'True -> Elem a b :~: 'True -> Elem a c :~: 'True
+witExtIn a (QualPred b bs) c Refl Refl =
+    case test a b of
+        Left  Refl | Refl <- witExtElem b bs c Refl -> Refl
+        Right Refl -> undefined
 
 --------------------------------------------------------------------------------
 -- Subset & Union (SU).
@@ -376,11 +441,6 @@ witSU1' a (QualPred b bs) c d =
         Right Refl | Refl <- lemSU4 b a c d Refl -> case testElem b (union c (remove a d)) of
             Left  Refl | Refl <- witSU1' a bs c d -> Refl
             Right Refl -> Refl
-
---------------------------------------------------------------------------------
-
-witSU2 :: forall a b . Q a -> Q b -> Subset (Difference (Union a b) b) a :~: 'True
-witSU2 = undefined
 
 --------------------------------------------------------------------------------
 

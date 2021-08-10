@@ -1,6 +1,7 @@
 --{-# OPTIONS_GHC -Wall #-}
 
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Language.Diorite.Region.Annotate
     (
@@ -214,13 +215,8 @@ atEtaL (LEta (ast, t, Stripped Refl)) p =
 -- we havent altered the original programs "meaning".
 --------------------------------------------------------------------------------
 
-type Extends :: forall p . Qualifier p -> Qualifier p -> Bool
-type family Extends ps qs where
-    Extends ('None)    _  = 'True
-    Extends (p ':. ps) qs = If (Elem p qs) (Extends ps (Remove p qs)) 'False
-
-class    (Subset ps qs ~ True) => (>=) ps qs
-instance (Subset ps qs ~ True) => (>=) ps qs
+class    (Extends ps qs ~ True) => (>=) ps qs
+instance (Extends ps qs ~ True) => (>=) ps qs
 
 data ExLAST c sym p sig where
     Ex :: (p qs, Strip l ~ sig)
@@ -228,13 +224,15 @@ data ExLAST c sym p sig where
        -> QualRep qs
        -> ExLAST c sym p sig
 
--- type LBeta sym qs sig l = (Beta sym qs sig, LblRep l, l :~~: sig)
--- type LEta  sym qs sig l = (Eta  sym qs sig, LblRep l, l :~~: sig)
-
+--   LBeta sym qs sig l = (Beta sym qs sig, LblRep l, l :~~: sig)
+--   LEta  sym qs sig l = (Eta  sym qs sig, LblRep l, l :~~: sig)
 type ExLBeta = ExLAST LBeta
 type ExLEta  = ExLAST LEta
-
 type ExLASTF sym p a = ExLBeta sym p ('S.Const a)
+
+-- pattern LB beta l r = LBeta (beta, l, r)
+-- pattern LE eta  l r = LEta  (eta, l, r)
+-- todo: figure out how to clean up the matching mess with patterns.
 
 annotateBeta :: forall sym qs ps rs sig a
     .  ( Sym sym
@@ -246,47 +244,59 @@ annotateBeta :: forall sym qs ps rs sig a
     -> Args sym rs sig
     -> ExLASTF sym ((>=) qs) a
 annotateBeta b ps (Nil)
-    | Refl <- W.witSubRefl (ps :: QualRep ps)
+    | Refl <- W.witExtRefl (ps :: QualRep ps)
     = Ex (LBeta (b, dress (symbol (undefined :: sym sig)), Stripped Refl)) (undefined :: QualRep ps)
 annotateBeta b ps (e :* as) = undefined
 annotateBeta b ps (p :~ as) = undefined
 
 annotateEta :: forall r (sym :: Symbol (Put r) *) (ps :: Qualifier (Put r)) sig
-    .  ( Sym sym
-       )
+    .  Sym sym
     => Eta sym ps sig
     -> (ExLEta sym ((>=) ps) sig, QualRep ps)
 annotateEta (Spine b)
-  | (Ex (LBeta (b', l, Stripped Refl)) ps', _) <- annotate b = 
-    (Ex (LEta (Spine b', l, Stripped Refl)) ps', undefined)
+  | (Ex (LBeta (b', l, Stripped Refl)) eps, ps) <- annotate b = 
+    (Ex (LEta (Spine b', l, Stripped Refl)) eps, ps)
 annotateEta ((n :: Name) :\ (e :: Eta sym qs a))
-  | (Ex (LEta (e', l, Stripped Refl)) ps', _) <- annotateEta e =
+  | (Ex (LEta ((e' :: Eta sym xs a), (l :: LblRep l), Stripped Refl)) (eps :: QualRep xs), (ps :: QualRep qs)) <- annotateEta e =
     let a = arg (Proxy :: Proxy sig) in
     witSDIso a |-
-    (Ex (LEta (n :\ e', LblPart (dress a) l, Stripped Refl)) ps', undefined)
+    (Ex (LEta (n :\ e', LblPart (dress a) l, Stripped Refl)) eps, ps)
   where
     arg :: forall a b . Sig a => Proxy (a 'S.:-> b) -> SigRep a
     arg _ = signature
--- note: ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/type_applications.html#type-applications-in-patterns
+-- note: would be nice to match on the exisential types in 'Beta'/'Eta' instead.
+--       ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/type_applications.html#type-applications-in-patterns
 annotateEta ((p :: Ev q) :\\ (e :: Eta sym qs a))
-  | (Ex (LEta ((e' :: Eta sym xs a), (l :: LblRep l), Stripped Refl)) (ps :: QualRep ps'), (qs :: QualRep qs)) <- annotateEta e
-  , (Refl :: Elem q xs :~: 'True) <- W.witSubIn
-        (qs :: QualRep qs)
-        (ps :: QualRep xs)
-        (Proxy :: Proxy q) Refl Refl
-  , (Refl :: Subset (Remove q qs) (Remove q xs) :~: 'True) <- W.witSubShrink
-        (Proxy :: Proxy q)
-        (qs :: QualRep qs)
-        (ps :: QualRep xs)
-        (undefined :: Elem q (Remove q qs) :~: 'False)
-        Refl
+  | (Ex (LEta ((e' :: Eta sym xs a), (l :: LblRep l), Stripped Refl)) (eps :: QualRep xs), (qs :: QualRep qs)) <- annotateEta e
+  , (Refl :: Elem q xs :~: 'True) <-
+        undefined
+  , (Refl :: Extends (Remove q qs) (Remove q xs) :~: 'True) <-
+        undefined
   = let (e''  :: Eta sym (Remove q xs) (q 'S.:=> a)) = p :\\ e' in
-    let (l'   :: LblRep (q ':=> l))            = LblPred Proxy l in
-    let (r    :: (q ':=> l) :~~: (q 'S.:=> a)) = Stripped Refl in
-    let (ps'' :: QualRep (Remove q ps'))       = remove (Proxy :: Proxy q) ps in
-    let (qs'  :: QualRep (Remove q qs))        = remove (Proxy :: Proxy q) qs in
-    (Ex (LEta (e'', l', r)) ps'', qs')
--- note: the
+    let (l'   :: LblRep (q ':=> l))                  = LblPred Proxy l in
+    let (r    :: (q ':=> l) :~~: (q 'S.:=> a))       = Stripped Refl in
+    let (eps' :: QualRep (Remove q xs))              = remove (Proxy :: Proxy q) eps in
+    let (qs'  :: QualRep (Remove q qs))              = remove (Proxy :: Proxy q) qs in
+    (Ex (LEta (e'', l', r)) eps', qs')
+
+-- annotateEta ((p :: Ev q) :\\ (e :: Eta sym qs a))
+--   | (Ex (LEta ((e' :: Eta sym xs a), (l :: LblRep l), Stripped Refl)) (ps :: QualRep ps'), (qs :: QualRep qs)) <- annotateEta e
+--   , (Refl :: Elem q xs :~: 'True) <- W.witSubIn
+--         (qs :: QualRep qs)
+--         (ps :: QualRep xs)
+--         (Proxy :: Proxy q) Refl Refl
+--   , (Refl :: Subset (Remove q qs) (Remove q xs) :~: 'True) <- W.witSubShrink
+--         (Proxy :: Proxy q)
+--         (qs :: QualRep qs)
+--         (ps :: QualRep xs)
+--         (undefined :: Elem q (Remove q qs) :~: 'False)
+--         Refl
+--   = let (e''  :: Eta sym (Remove q xs) (q 'S.:=> a)) = p :\\ e' in
+--     let (l'   :: LblRep (q ':=> l))            = LblPred Proxy l in
+--     let (r    :: (q ':=> l) :~~: (q 'S.:=> a)) = Stripped Refl in
+--     let (ps'' :: QualRep (Remove q ps'))       = remove (Proxy :: Proxy q) ps in
+--     let (qs'  :: QualRep (Remove q qs))        = remove (Proxy :: Proxy q) qs in
+--     (Ex (LEta (e'', l', r)) ps'', qs')
 
 annotate :: Sym sym => ASTF sym qs a -> (ExLASTF sym ((>=) qs) a, QualRep qs)
 annotate = constMatch undefined undefined
