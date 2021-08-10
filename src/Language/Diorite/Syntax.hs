@@ -86,9 +86,8 @@ data Eta sym qs sig where
     (:\)  :: Sig a => Name -> Eta sym qs sig -> Eta sym qs (a ':-> sig)
     -- ^ Evidence-abstraction.
 --  (:\\) :: Ev q -> Eta sym (q ':. qs) sig -> Eta sym qs (q ':=> sig) 
-    (:\\) :: Elem q qs ~ 'True => Ev q -> Eta sym qs sig -> Eta sym (Remove q qs) (q ':=> sig)
--- note: old rule for evidence-abstraction was too strict for quals. like
---       '((>=) ps)' used in region annotation.
+    (:\\) :: (Elem q qs ~ 'True, Typeable q) => Ev q -> Eta sym qs sig -> Eta sym (Remove q qs) (q ':=> sig)
+-- todo: clean up the new constraints.
 
 infixl 1 :$, :#
 infixr 9 :\, :\\
@@ -138,7 +137,7 @@ maxEvEta (Spine b)    = maxEvBeta b
     maxEvBeta _             = 0
 
 -- | Interface for evidence binding.
-elam :: (Ev q -> Eta sym (q ':. qs) b) -> Eta sym qs (q ':=> b)
+elam :: Typeable q => (Ev q -> Eta sym (q ':. qs) b) -> Eta sym qs (q ':=> b)
 elam f = Ev v :\\ body
   where
     v    = maxEvEta body + 1

@@ -52,12 +52,12 @@ type family SmartApply qs ex where
 --      repersentation of the symbol's constraints, and its sub-trees given as
 --      'Args'.
 match :: forall p sym qs a (c :: Signature p * -> *)
-    . (forall ps sig . (a ~ Result sig, qs ~ SmartApply 'None ps)
+    .  (forall ps sig . (a ~ Result sig, qs ~ SmartApply 'None ps)
             => sym sig -> Args sym ps sig -> c ('Const a))
-       -- ^ Match on a symbol. (ps ~ qs)
+       -- ^ Match on a symbol (ps ~ qs).
     -> (forall ps rs sig . (a ~ Result sig, qs ~ SmartApply rs ps)
             => Name -> QualRep rs -> Args sym ps sig -> c ('Const a))
-       -- ^ Lookup and instantiate a variable. (rs + ps ~ qs)
+       -- ^ Lookup and instantiate a variable (rs + ps ~ qs).
     -> ASTF sym qs a
        -- ^ Expression to traverse.
     -> c ('Const a)

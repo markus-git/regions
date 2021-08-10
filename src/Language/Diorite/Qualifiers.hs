@@ -26,8 +26,11 @@ module Language.Diorite.Qualifiers
     , insert
     , remove
     , union
+    -- ** ...
+    , witQual
     ) where
 
+import Data.Constraint (Dict(..))
 import Data.Proxy (Proxy(..))
 import Data.Type.Equality ((:~:)(..), testEquality)
 import Data.Typeable (Typeable)
@@ -92,6 +95,12 @@ type family Subset ps qs where
     Subset ('None)    qs = 'True
     Subset (p ':. ps) qs = If (Elem p qs) (Subset ps qs) 'False
 
+-- | ...
+type Set :: forall p . Qualifier p -> Bool
+type family Set qs where
+    Set ('None)    = 'True
+    Set (q ':. qs) = If (Elem q qs) 'False (Set qs)
+
 -- type qs >= ps = (Subset ps qs ~ 'True)
 -- type qs ~= ps = (Subset ps qs ~ 'True, Subset qs ps ~ 'True)
 
@@ -151,6 +160,14 @@ remove p (QualPred q qs) =
 union :: QualRep ps -> QualRep qs -> QualRep (Union ps qs)
 union (QualNone)      qs = qs
 union (QualPred p ps) qs = QualPred p (union ps (remove p qs))
+
+--------------------------------------------------------------------------------
+-- ** ...
+
+-- | ...
+witQual :: QualRep qs -> Dict (Qual qs)
+witQual (QualNone)      = Dict
+witQual (QualPred _ qs) | Dict <- witQual qs = Dict
 
 --------------------------------------------------------------------------------
 -- Fin.
