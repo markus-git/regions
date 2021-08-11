@@ -246,7 +246,15 @@ annotateBeta :: forall sym qs ps rs sig a
 annotateBeta b ps (Nil)
     | Refl <- W.witExtRefl (ps :: QualRep ps)
     = Ex (LBeta (b, dress (symbol (undefined :: sym sig)), Stripped Refl)) (undefined :: QualRep ps)
-annotateBeta b ps (e :* as) = undefined
+annotateBeta b ps ((e :: Eta sym xs x) :* (as :: Args sym ys y))
+    | (Ex (LEta ((e' :: Eta sym exs x), (l :: LblRep l), Stripped Refl)) (exs :: QualRep exs), xs :: QualRep xs) <- annotateEta e
+    --
+    , Refl :: Extends xs exs :~: 'True <- Refl
+    , Refl :: Strip l :~: x <- Refl
+    --
+    = let b' = b :$ e' :: Beta sym (Union ps exs) y in
+      --let l' = LblPart l _ :: LblRep (l ':-> y) in ...No!.. the opposite? Do I just want (Dress y)?
+      undefined
 annotateBeta b ps (p :~ as) = undefined
 
 annotateEta :: forall r (sym :: Symbol (Put r) *) (ps :: Qualifier (Put r)) sig
@@ -268,35 +276,19 @@ annotateEta ((n :: Name) :\ (e :: Eta sym qs a))
 --       ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/type_applications.html#type-applications-in-patterns
 annotateEta ((p :: Ev q) :\\ (e :: Eta sym qs a))
   | (Ex (LEta ((e' :: Eta sym xs a), (l :: LblRep l), Stripped Refl)) (eps :: QualRep xs), (qs :: QualRep qs)) <- annotateEta e
-  , (Refl :: Elem q xs :~: 'True) <-
-        undefined
-  , (Refl :: Extends (Remove q qs) (Remove q xs) :~: 'True) <-
-        undefined
+  --
+  , Refl :: Extends qs xs :~: 'True <- Refl
+  , Refl :: Elem q qs :~: 'True <- Refl
+  --
+  , Refl :: Elem q xs :~: 'True <- W.witExtIn (Proxy :: Proxy q) (qs :: QualRep qs) (eps :: QualRep xs) Refl Refl
+  , Refl :: Extends (Remove q qs) (Remove q xs) :~: 'True <- W.witExtShrink (Proxy :: Proxy q) (qs :: QualRep qs) (eps :: QualRep xs) Refl
+  --
   = let (e''  :: Eta sym (Remove q xs) (q 'S.:=> a)) = p :\\ e' in
     let (l'   :: LblRep (q ':=> l))                  = LblPred Proxy l in
     let (r    :: (q ':=> l) :~~: (q 'S.:=> a))       = Stripped Refl in
     let (eps' :: QualRep (Remove q xs))              = remove (Proxy :: Proxy q) eps in
     let (qs'  :: QualRep (Remove q qs))              = remove (Proxy :: Proxy q) qs in
     (Ex (LEta (e'', l', r)) eps', qs')
-
--- annotateEta ((p :: Ev q) :\\ (e :: Eta sym qs a))
---   | (Ex (LEta ((e' :: Eta sym xs a), (l :: LblRep l), Stripped Refl)) (ps :: QualRep ps'), (qs :: QualRep qs)) <- annotateEta e
---   , (Refl :: Elem q xs :~: 'True) <- W.witSubIn
---         (qs :: QualRep qs)
---         (ps :: QualRep xs)
---         (Proxy :: Proxy q) Refl Refl
---   , (Refl :: Subset (Remove q qs) (Remove q xs) :~: 'True) <- W.witSubShrink
---         (Proxy :: Proxy q)
---         (qs :: QualRep qs)
---         (ps :: QualRep xs)
---         (undefined :: Elem q (Remove q qs) :~: 'False)
---         Refl
---   = let (e''  :: Eta sym (Remove q xs) (q 'S.:=> a)) = p :\\ e' in
---     let (l'   :: LblRep (q ':=> l))            = LblPred Proxy l in
---     let (r    :: (q ':=> l) :~~: (q 'S.:=> a)) = Stripped Refl in
---     let (ps'' :: QualRep (Remove q ps'))       = remove (Proxy :: Proxy q) ps in
---     let (qs'  :: QualRep (Remove q qs))        = remove (Proxy :: Proxy q) qs in
---     (Ex (LEta (e'', l', r)) ps'', qs')
 
 annotate :: Sym sym => ASTF sym qs a -> (ExLASTF sym ((>=) qs) a, QualRep qs)
 annotate = constMatch undefined undefined

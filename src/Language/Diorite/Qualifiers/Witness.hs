@@ -52,6 +52,17 @@ import qualified Unsafe.Coerce as Unsafe (unsafeCoerce)
 -- witSubUni        :: Subset a (Union a b) :~: 'True
 -- witSubTrans      :: Subset a b :~: 'True -> Subset b c :~: 'True -> Subset a c :~: 'True
 --
+-- > Extends:
+-- witExtRefl       :: Extends a a :~: 'True
+-- witExtNotIn      :: Elem a b :~: 'True -> Elem a c :~: 'False -> Extends b c :~: 'False
+-- witExtSub        :: Extends a b :~: 'True -> Subset a b :~: 'True
+-- witExtElem       :: Extends (a ':. b) c :~: 'True -> Elem a c :~: 'True
+-- witExtAdd        :: Extends b (Remove a c) :~: 'True -> Extends b c :~: 'True
+-- witExtRem        :: Extends (a ':. b) c :~: 'True -> Extends b c :~: 'True
+-- witExtCons       :: Extends b c :~: 'True -> Extends b (a ':. c) :~: 'True
+-- witExtShrink     :: Elem a c :~: 'True -> Extends (Remove a b) (Remove a c) :~: Extends b c
+-- witExtIn         :: Extends b c :~: 'True -> Elem a b :~: 'True -> Elem a c :~: 'True
+--
 -- > Subset & Union (SU):
 -- witSURemove :: Elem a d :~: 'True -> Subset (Union b (Remove a c)) d :~: Subset (Union b c) d
 -- witSUCons   :: Elem a d :~: 'True -> Subset (Union b c) d :~: Subset (Union b (a ':. c)) d
