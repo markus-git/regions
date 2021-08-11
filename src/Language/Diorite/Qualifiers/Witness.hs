@@ -378,48 +378,39 @@ witExtSub (QualPred a as) b Refl =
 witExtElem :: forall a b c . T a => P a -> Q b -> Q c -> Extends (a ':. b) c :~: 'True -> Elem a c :~: 'True
 witExtElem a b c Refl | Refl <- witExtSub (QualPred a b) c Refl, Refl <- witSubElem a b c Refl = Refl
 
-witExtCons :: forall a b c . T a => P a -> Q b -> Q c -> Extends (a ':. b) (a ':. c) :~: Extends b c
-witExtCons = undefined
-
-witExtAdd :: forall a b c . T a => P a -> Q b -> Q c -> Extends b c :~: 'True -> Extends b (a ':. c) :~: 'True
+witExtAdd :: forall a b c . T a => P a -> Q b -> Q c -> Extends b (Remove a c) :~: 'True -> Extends b c :~: 'True
 witExtAdd _ (QualNone) _ _ = Refl
 witExtAdd a (QualPred b bs) c Refl =
-    -- Extends (q:qs) c ~ True
-    case test a b of
-        -- a = q
-        -- 
-        -- Extends (q:qs) (q:c) ~ True
-        Left  Refl -> undefined
-        Right Refl | Refl <- witEqRefl a b -> case testElem b c of
-            Left  Refl | Refl <- witExtAdd a bs (remove b c) Refl -> Refl
-            Right x    -> case x of {}
+    case testElem b c of
+        Left  Refl | Refl <- witExtElem b bs (remove a c) Refl, Refl <- witRemOrd b a c, Refl <- witExtAdd a bs (remove b c) Refl -> Refl
+        Right Refl | Refl <- witExtElem b bs (remove a c) Refl -> case witElemAdd b a c Refl of {}
 
 witExtRem :: forall a b c . T a => P a -> Q b -> Q c -> Extends (a ':. b) c :~: 'True -> Extends b c :~: 'True
 witExtRem _ (QualNone) _ _ = Refl
-witExtRem a (QualPred (b :: Proxy q) (bs :: QualRep qs)) c Refl
-    | (Refl :: Elem a c :~: 'True) <- witExtElem a (QualPred b bs) c Refl
-    , (Refl :: Extends (q ':. qs) (Remove a c) :~: 'True) <- Refl
-    , (Refl :: Elem q (Remove a c) :~: 'True) <- witExtElem b bs (remove a c) Refl
-    , (Refl :: Extends qs (Remove q (Remove a c)) :~: 'True) <- Refl
-    --
-    , (Refl :: Elem q c :~: 'True) <- undefined
-    = undefined
-  -- Extends (a ':. q ':. qs) c :~: 'True
-  -- Elem a c :~: 'True
-  -- ->
-  -- Elem q (Remove a c) :~: 'True
-    
-witExtShrink :: forall a b c . T a => P a -> Q b -> Q c -> Extends (Remove a b) (Remove a c) :~: Extends b c
-witExtShrink _ (QualNone) _ = Refl
-witExtShrink a (QualPred b bs) c =
+witExtRem a (QualPred b bs) c Refl
+    | Refl <- witExtElem a (QualPred b bs) c Refl
+    , Refl <- witExtElem b bs (remove a c) Refl
+    , Refl <- witRemOrd b a c
+    , Refl <- witExtAdd a bs (remove b c) Refl
+    , Refl <- witElemAdd b a c Refl
+    = Refl
+
+witExtCons :: forall a b c . T a => P a -> Q b -> Q c -> Extends b c :~: 'True -> Extends b (a ':. c) :~: 'True
+witExtCons _ (QualNone) _ _ = Refl
+witExtCons a (QualPred b bs) c Refl =
     case test a b of
-        Left  Refl -> case testElem a c of
-            Left  Refl -> Refl
-            -- a ~ b -> Elem a b ~ True
-            -- Elem a c ~ False
-            Right Refl -> undefined
+        Left  Refl | Refl <- witExtRem a bs c Refl -> Refl
+        Right Refl | Refl <- witEqRefl a b -> case testElem b c of
+            Left  Refl | Refl <- witExtCons a bs (remove b c) Refl -> Refl
+            Right x    -> case x of {}
+    
+witExtShrink :: forall a b c . T a => P a -> Q b -> Q c -> Elem a c :~: 'True -> Extends (Remove a b) (Remove a c) :~: Extends b c
+witExtShrink _ (QualNone) _ _ = Refl
+witExtShrink a (QualPred (b :: P q) (bs :: Q qs)) c Refl =
+    case test a b of
+        Left  Refl -> Refl
         Right Refl | Refl <- witEqRefl a b, Refl <- witElemRemove b a c Refl -> case testElem b c of
-            Left  Refl | Refl <- witRemOrd a b c, Refl <- witExtShrink a bs (remove b c) -> Refl
+            Left  Refl | Refl <- witRemOrd b a c, Refl <- witElemRemove a b c Refl, Refl <- witExtShrink a bs (remove b c) Refl -> Refl
             Right Refl -> Refl
 
 witExtIn :: forall a b c . T a => P a -> Q b -> Q c -> Extends b c :~: 'True -> Elem a b :~: 'True -> Elem a c :~: 'True
