@@ -5,11 +5,16 @@ module Language.Diorite
     , module Language.Diorite.Sugar
     , module Language.Diorite.Interpretation
     , module Language.Diorite.Decoration
-    , module Language.Diorite.Traversal
+  --, module Language.Diorite.Traversal
+    , Args(..)
+    , SmartApply
+    , match
+    , constMatch
+    , transMatch
     ) where
 
 import Language.Diorite.Signatures
-import Language.Diorite.Qualifiers
+import Language.Diorite.Qualifiers hiding (QualArgs(..))
 import Language.Diorite.Syntax
 import Language.Diorite.Sugar
 import Language.Diorite.Interpretation

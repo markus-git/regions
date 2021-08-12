@@ -5,7 +5,8 @@
 module Language.Diorite.Traversal
     (
     -- * "Pattern matching" on ASTs.
-      Args(..)
+      QualArgs(..)
+    , Args(..)
     , SmartApply
     , match
     , constMatch
@@ -25,7 +26,7 @@ import qualified Control.Applicative as A
 -- | ...
 type QualArgs :: * -> *
 data QualArgs p = Empty | Fun (Qualifier p) (QualArgs p) | Pre p (QualArgs p)
--- todo: this is basically the "spine" of 'Exists', could make an 'Ex a p'.
+-- todo: this is basically the "spine" of 'Exists'.
 
 -- | List of a symbol's arguments.
 type Args :: forall p . Symbol p * -> QualArgs p -> Signature p * -> *
