@@ -450,6 +450,21 @@ witExtIn a (QualPred b bs) c Refl Refl | Refl <- witExtElem b bs c Refl =
 {-# RULES "witExtIn" forall a b c . witExtIn a b c Refl Refl = Unsafe.unsafeCoerce Refl #-}
 
 --------------------------------------------------------------------------------
+-- Extends & Union (EU).
+
+witEURefl :: forall a b c . Q a -> Q b -> Q c -> Extends a (Union b c) :~: Extends a (Union c b)
+witEURefl (QualNone) _ _ = Refl
+witEURefl (QualPred (a :: P q) (as :: Q qs)) b c | Refl <- witElemUniRefl a b c =
+  case testElem a (union b c) of
+      Left  Refl
+          | Refl :: Extends qs (Union b c) :~: Extends qs (Union c b) <- witEURefl as b c
+          -> (undefined :: Extends qs (Remove q (Union b c)) :~: Extends qs (Remove q (Union c b)))
+      Right Refl -> Refl
+
+witEUBoth :: forall a b c d . Q a -> Q b -> Q c -> Q d -> Extends a b :~: 'True -> Extends c d :~: 'True -> Extends (Union a c) (Union b d) :~: 'True
+witEUBoth = undefined
+
+--------------------------------------------------------------------------------
 -- Subset & Union (SU).
 
 witSURemove :: forall a b c d . T a => P a -> Q b -> Q c -> Q d -> Elem a d :~: 'True -> Subset (Union b (Remove a c)) d :~: Subset (Union b c) d
@@ -496,22 +511,22 @@ lemSU3 a (QualPred (b :: P q) (bs :: Q qs)) c d Refl =
             Right Refl | Refl <- witRemOrd b a c, Refl <- lemSU2 a bs (remove b c) d Refl -> Refl
         Right Refl -> Refl
 
-witSU1 :: forall a b c d . T a => P a -> Q b -> Q c -> Q d -> Subset (Union (a ':. b) c) d :~: Subset (Union b (a ':. c)) d
-witSU1 a b c d =
+lemSU4 :: forall a b c d . (T a, T b) => P a -> P b -> Q c -> Q d -> a :/~: b -> Elem a (Union c (Remove b d)) :~: Elem a (Union c (b ':. d))
+lemSU4 a b c d Refl | Refl <- witElemUniRemove a b c d Refl, Refl <- witElemUniCons a b c d Refl = Refl
+
+witSU1L :: forall a b c d . T a => P a -> Q b -> Q c -> Q d -> Subset (Union (a ':. b) c) d :~: Subset (Union b (a ':. c)) d
+witSU1L a b c d =
     case testElem a d of
         Left  Refl | Refl <- lemSU3 a b c d Refl -> Refl
         Right Refl | Refl <- witElemCons a b c, Refl <- witSubNotIn a (union b (QualPred a c)) d Refl Refl -> Refl 
 
-lemSU4 :: forall a b c d . (T a, T b) => P a -> P b -> Q c -> Q d -> a :/~: b -> Elem a (Union c (Remove b d)) :~: Elem a (Union c (b ':. d))
-lemSU4 a b c d Refl | Refl <- witElemUniRemove a b c d Refl, Refl <- witElemUniCons a b c d Refl = Refl
-
-witSU1' :: forall a b c d . T a => P a -> Q b -> Q c -> Q d -> Subset b (Union (a ':. c) d) :~: Subset b (Union c (a ':. d))
-witSU1' _ (QualNone) _ _ = Refl
-witSU1' a (QualPred b bs) c d =
+witSU1R :: forall a b c d . T a => P a -> Q b -> Q c -> Q d -> Subset b (Union (a ':. c) d) :~: Subset b (Union c (a ':. d))
+witSU1R _ (QualNone) _ _ = Refl
+witSU1R a (QualPred b bs) c d =
     case test b a of
-        Left  Refl | Refl <- witElemCons a c d, Refl <- witSU1' a bs c d -> Refl
+        Left  Refl | Refl <- witElemCons a c d, Refl <- witSU1R a bs c d -> Refl
         Right Refl | Refl <- lemSU4 b a c d Refl -> case testElem b (union c (remove a d)) of
-            Left  Refl | Refl <- witSU1' a bs c d -> Refl
+            Left  Refl | Refl <- witSU1R a bs c d -> Refl
             Right Refl -> Refl
 
 --------------------------------------------------------------------------------

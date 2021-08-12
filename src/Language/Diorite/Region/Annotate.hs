@@ -216,23 +216,45 @@ atEtaL (LEta (ast, t, Stripped Refl)) p =
 -- we havent altered the original programs "meaning".
 --------------------------------------------------------------------------------
 
+-- data ExLAST c sym p sig where
+--     Ex :: (p qs, Strip l ~ sig)
+--        => c sym qs sig l
+--        -> QualRep qs
+--        -> ExLAST c sym p sig
+--   LBeta sym qs sig l = (Beta sym qs sig, LblRep l, l :~~: sig)
+--   LEta  sym qs sig l = (Eta  sym qs sig, LblRep l, l :~~: sig)
+--   ExLBeta = ExLAST LBeta
+--   ExLEta  = ExLAST LEta
+
 type LblArg :: forall r . Label r * -> *
 data LblArg l where
 
 class    (Extends ps qs ~ True) => (>=) ps qs
 instance (Extends ps qs ~ True) => (>=) ps qs
 
-data ExLAST c sym p sig where
-    Ex :: (p qs, Strip l ~ sig)
-       => c sym qs sig l
-       -> QualRep qs
-       -> ExLAST c sym p sig
+type ExLBeta :: forall r
+    .  (Symbol (Put r) *)
+    -> (Qualifier (Put r) -> Constraint)
+    -> (Signature (Put r) *)
+    -> *
+data ExLBeta sym p sig where
+    ExLBeta :: (p qs, Strip l ~ sig)
+        => Beta sym qs sig
+        -> LblRep l
+        -> QualRep qs
+        -> ExLBeta sym p sig
 
---   LBeta sym qs sig l = (Beta sym qs sig, LblRep l, l :~~: sig)
---   LEta  sym qs sig l = (Eta  sym qs sig, LblRep l, l :~~: sig)
-type ExLBeta = ExLAST LBeta
-type ExLEta  = ExLAST LEta
-type ExLASTF sym p a = ExLBeta sym p ('S.Const a)
+type ExLEta :: forall r
+    .  (Symbol (Put r) *)
+    -> (Qualifier (Put r) -> Constraint)
+    -> (Signature (Put r) *)
+    -> *
+data ExLEta sym p sig where
+    ExLEta :: (p qs, Strip l ~ sig)
+        => Eta sym qs sig
+        -> LblRep l
+        -> QualRep qs
+        -> ExLEta sym p sig
 
 -- pattern LB beta l r = LBeta (beta, l, r)
 -- pattern LE eta  l r = LEta  (eta, l, r)
@@ -249,48 +271,53 @@ annotateBeta ::
     .  ( Sym sym
        , a  ~ Result sig
        , qs ~ SmartApply ps rs
-       , eps >= ps
+       , Extends ps eps ~ 'True
        )
     => Beta sym eps sig
     -> Args sym rs  sig
+    -> QualRep eps
     -> QualRep ps
-    -> ExLASTF sym ((>=) qs) a
-annotateBeta (b {- Const a -}) Nil ps
+    -> (ExLBeta sym ((>=) qs) ('S.Const a), QualRep qs)
+annotateBeta (b {- Const a -}) Nil eps ps
     --
     | Refl :: qs :~: SmartApply ps 'T.Empty <- Refl
     , Refl :: qs :~: ps <- Refl
+    , Dict :: Dict (Typeable a) <- undefined
     --
-    = let b'  = b :: Beta sym eps ('S.Const a) in
-      let ps' = ps :: QualRep ps in
+    = let b'   = b  :: Beta sym eps ('S.Const a) in
+      let ps'  = ps :: QualRep ps in
+      let eps' = eps :: QualRep eps in
+      let l    = LblConst :: LblRep ('Const a) in
       --
-      undefined
-      --Ex (LBeta (b', l', r)) ps
-annotateBeta (b {- x :-> y -}) ((e :: Eta sym xs x) :* (as :: Args sym ys y)) ps
+      (ExLBeta b' l eps', ps')
+-- todo: this l is useless, as it forgets the whole application of 'sig' so far.
+annotateBeta (b {- x :-> y -}) ((e :: Eta sym xs x) :* (as :: Args sym ys y)) eps ps
     --
-    | (Ex ( LEta ( (e' :: Eta sym exs x)
-                 , (l  :: LblRep l)
-                 , (Stripped Refl :: l :~~: x)))
-                 (exs  :: QualRep exs)
-          , xs :: QualRep xs)
+    | ( ExLEta (e' :: Eta sym exs x) (l :: LblRep l) (exs :: QualRep exs)
+      , (xs :: QualRep xs))
         <- annotateEta e
-    --
+    -- exs ~ qs2, xs ~ ps1
     , Refl :: Extends xs exs :~: 'True <- Refl
+    , Refl :: Extends ps eps :~: 'True <- Refl
     , Refl :: Strip l :~: x <- Refl
+    , Refl :: rs :~: 'T.Fun xs ys <- Refl
+    , Refl :: Extends (Union ps xs) (Union eps exs) :~: 'True <- undefined
     --
-    = let b'  = b :$ e' :: Beta sym (Union eps exs) y in
-      let ps' = union ps xs :: QualRep (Union ps xs) in
+    = let b'   = b :$ e' :: Beta sym (Union eps exs) y in
+      let ps'  = union ps xs :: QualRep (Union ps xs) in
+      let eps' = union eps exs :: QualRep (Union eps exs) in
       --
-      undefined
-      --Ex (LBeta (b', l', r)) ps'
-annotateBeta b ((p :: Ev x) :~ (as :: Args sym ys y)) ps
+      annotateBeta b' as eps' ps'
+annotateBeta b ((p :: Ev x) :~ (as :: Args sym ys y)) eps ps
     -- 
     | Refl :: qs :~: SmartApply ps ('T.Pre x ys) <- Refl
     , Dict :: Dict (Typeable x) <- undefined
     --
-    = let b'  = b :# p :: Beta sym (x ':. eps) y in
-      let ps' = QualPred (Proxy :: Proxy x) ps :: QualRep (x ':. ps) in
+    = let b'   = b :# p :: Beta sym (x ':. eps) y in
+      let ps'  = QualPred (Proxy :: Proxy x) ps :: QualRep (x ':. ps) in
+      let eps' = QualPred (Proxy :: Proxy x) eps :: QualRep (x ':. eps) in
       --
-      undefined
+      annotateBeta b' as eps' ps'
 
 annotateEta :: forall r (sym :: Symbol (Put r) *)
                         (ps  :: Qualifier (Put r))
@@ -299,29 +326,21 @@ annotateEta :: forall r (sym :: Symbol (Put r) *)
     => Eta sym ps sig
     -> (ExLEta sym ((>=) ps) sig, QualRep ps)
 annotateEta (Spine b)
-    | (Ex (LBeta (b', l, Stripped Refl)) eps, ps)
+    | ( ExLBeta (b' :: Beta sym xs a) (l :: LblRep l) (eps :: QualRep xs)
+      , (ps :: QualRep qs))
         <- annotate b
     = --
-      ( Ex (LEta ( Spine b'
-                 , l
-                 , Stripped Refl))
-                 eps
+      ( ExLEta (Spine b') l eps
       , ps)
 annotateEta ((n :: Name) :\ (e :: Eta sym qs a))
-    | (Ex ( LEta ( (e' :: Eta sym xs a)
-                 , (l :: LblRep l)
-                 , Stripped Refl))
-                 (eps :: QualRep xs)
-          , (ps :: QualRep qs))
+    | ( ExLEta (e' :: Eta sym xs a) (l :: LblRep l) (eps :: QualRep xs)
+      , (ps :: QualRep qs))
         <- annotateEta e
     = --
       let a = arg (Proxy :: Proxy sig) in
       witSDIso a |-
       --
-      ( Ex ( LEta ( n :\ e'
-                  , LblPart (dress a) l
-                  , Stripped Refl))
-                  eps
+      ( ExLEta (n :\ e') (LblPart (dress a) l) eps
       , ps)
   where
     arg :: forall a b . Sig a => Proxy (a 'S.:-> b) -> SigRep a
@@ -329,11 +348,8 @@ annotateEta ((n :: Name) :\ (e :: Eta sym qs a))
 -- note: would be nice to match on the exisential types in 'Beta'/'Eta' instead.
 --       ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/type_applications.html#type-applications-in-patterns
 annotateEta ((p :: Ev q) :\\ (e :: Eta sym qs a))
-    | (Ex ( LEta ( (e' :: Eta sym xs a)
-                 , (l :: LblRep l)
-                 , (Stripped Refl)))
-                 (eps :: QualRep xs)
-          , (qs :: QualRep qs))
+    | ( ExLEta (e' :: Eta sym xs a) (l :: LblRep l) (eps :: QualRep xs)
+      , (qs :: QualRep qs))
         <- annotateEta e
       --
     , Refl :: Extends qs xs :~: 'True <- Refl
@@ -350,10 +366,24 @@ annotateEta ((p :: Ev q) :\\ (e :: Eta sym qs a))
       let (eps' :: QualRep (Remove q xs)) = remove (Proxy :: Proxy q) eps in
       let (qs'  :: QualRep (Remove q qs)) = remove (Proxy :: Proxy q) qs in
       --
-      (Ex (LEta (e'', l', r)) eps', qs')
+      ( ExLEta e'' l' eps'
+      , qs')
 
-annotate :: Sym sym => ASTF sym qs a -> (ExLASTF sym ((>=) qs) a, QualRep qs)
-annotate = constMatch undefined undefined
+annotate :: forall r (sym :: Symbol (Put r) *)
+                     (qs :: Qualifier (Put r))
+                     (a :: *)
+    .  Sym sym
+    => ASTF sym qs a
+    -> (ExLBeta sym ((>=) qs) ('S.Const a), QualRep qs)
+annotate = constMatch matchSym undefined
+  where
+    matchSym :: forall (ps  :: T.QualArgs (Put r))
+                       (sig :: Signature (Put r) *)
+        .  (a ~ Result sig, qs ~ SmartApply 'None ps)
+        => sym sig
+        -> Args sym ps sig
+        -> (ExLBeta sym ((>=) qs) ('S.Const a), QualRep qs)
+    matchSym s as = annotateBeta (Sym s) as (QualNone) (QualNone)
 
 --------------------------------------------------------------------------------
 -- Fin.
