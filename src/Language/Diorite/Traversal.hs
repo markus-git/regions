@@ -26,7 +26,7 @@ import qualified Control.Applicative as A
 -- | ...
 type QualArgs :: * -> *
 data QualArgs p = Empty | Fun (Qualifier p) (QualArgs p) | Pre p (QualArgs p)
--- todo: this is basically the "spine" of 'Exists'.
+-- todo: this is basically the "spine" of 'Exists', also causes name-clash.
 
 -- | List of a symbol's arguments.
 type Args :: forall p . Symbol p * -> QualArgs p -> Signature p * -> *

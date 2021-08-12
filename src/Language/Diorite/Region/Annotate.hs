@@ -228,6 +228,7 @@ atEtaL (LEta (ast, t, Stripped Refl)) p =
 
 type LblArg :: forall r . Label r * -> *
 data LblArg l where
+  
 
 class    (Extends ps qs ~ True) => (>=) ps qs
 instance (Extends ps qs ~ True) => (>=) ps qs
@@ -269,16 +270,16 @@ annotateBeta ::
              (sig :: Signature (Put r) *)
              (a   :: *)
     .  ( Sym sym
-       , a  ~ Result sig
-       , qs ~ SmartApply ps rs
-       , Extends ps eps ~ 'True
+       , a     ~ Result sig
+       , qs    ~ SmartApply ps rs
+       , 'True ~ Extends ps eps
        )
     => Beta sym eps sig
     -> Args sym rs  sig
     -> QualRep eps
     -> QualRep ps
     -> (ExLBeta sym ((>=) qs) ('S.Const a), QualRep qs)
-annotateBeta (b {- Const a -}) Nil eps ps
+annotateBeta b Nil eps ps
     --
     | Refl :: qs :~: SmartApply ps 'T.Empty <- Refl
     , Refl :: qs :~: ps <- Refl
@@ -291,7 +292,7 @@ annotateBeta (b {- Const a -}) Nil eps ps
       --
       (ExLBeta b' l eps', ps')
 -- todo: this l is useless, as it forgets the whole application of 'sig' so far.
-annotateBeta (b {- x :-> y -}) ((e :: Eta sym xs x) :* (as :: Args sym ys y)) eps ps
+annotateBeta b ((e :: Eta sym xs x) :* (as :: Args sym ys y)) eps ps
     --
     | ( ExLEta (e' :: Eta sym exs x) (l :: LblRep l) (exs :: QualRep exs)
       , (xs :: QualRep xs))
