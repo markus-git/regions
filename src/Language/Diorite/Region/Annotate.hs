@@ -2,6 +2,7 @@
 
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Language.Diorite.Region.Annotate
     (
@@ -124,6 +125,10 @@ type family Dress sig where
     Dress (a 'S.:-> b) = Dress a ':-> Dress b
     Dress (p 'S.:=> a) = p ':=> Dress a
 
+-- | Witness of equality between a symbol's signature and its erased annotation.
+newtype lbl :~~: sig = Stripped (Strip lbl :~: sig)
+infixr :~~:
+
 --------------------------------------------------------------------------------
 -- ** Rep. of ...
 
@@ -164,40 +169,36 @@ witSDIso (SigPred _ a) | Refl <- witSDIso a = Refl
 --------------------------------------------------------------------------------
 -- ** ...
 
--- | Witness of equality between a symbol's signature and its erased annotation.
-newtype lbl :~~: sig = Stripped (Strip lbl :~: sig)
-infixr :~~:
+--newtype LBeta sym qs sig l = LBeta (Beta sym qs sig, LblRep l, l :~~: sig)
+--newtype LEta  sym qs sig l = LEta  (Eta  sym qs sig, LblRep l, l :~~: sig)
 
-newtype LBeta sym qs sig l = LBeta (Beta sym qs sig, LblRep l, l :~~: sig)
-newtype LEta  sym qs sig l = LEta  (Eta  sym qs sig, LblRep l, l :~~: sig)
-
-localL :: forall r (sym :: Symbol (Put r) *) (qs :: Qualifier (Put r)) (p :: r) (a :: *) (l :: Label r *)
-    .  (Rgn :<: sym, Typeable p, Typeable r)
-    => LBeta sym ('Put p ':. qs) ('S.Const a) l
-    -> Place p
-    -> LBeta sym qs ('S.Const a) l
-localL (LBeta (ast, t, Stripped Refl)) p =
-    LBeta (local ast p, t, Stripped Refl)
+-- localL :: forall r (sym :: Symbol (Put r) *) (qs :: Qualifier (Put r)) (p :: r) (a :: *) (l :: Label r *)
+--     .  (Rgn :<: sym, Typeable p, Typeable r)
+--     => LBeta sym ('Put p ':. qs) ('S.Const a) l
+--     -> Place p
+--     -> LBeta sym qs ('S.Const a) l
+-- localL (LBeta (ast, t, Stripped Refl)) p =
+--     LBeta (local ast p, t, Stripped Refl)
   
-atBetaL :: forall sym r qs a l
-    .  (Rgn :<: sym, Remove ('Put r) qs ~ qs)
-    => LBeta sym qs ('S.Const a) l
-    -> Place r
-    -> LBeta sym ('Put r ':. qs) ('S.Const a) (l ':^ r)
-atBetaL (LBeta (ast, t, Stripped Refl)) p =
-    LBeta (atBeta ast p, LblAt Proxy t, Stripped Refl)
--- todo: not sure if 'atBetaL' and 'atEtaL' should have a 'Place r' argument or
---       produce an AST which expects a 'Place r'.
--- todo: also not sure if building a 'LblRep' alongside the labelled 'Beta' and
---       'Eta' is necessary yet.
+-- atBetaL :: forall sym r qs a l
+--     .  (Rgn :<: sym, Remove ('Put r) qs ~ qs)
+--     => LBeta sym qs ('S.Const a) l
+--     -> Place r
+--     -> LBeta sym ('Put r ':. qs) ('S.Const a) (l ':^ r)
+-- atBetaL (LBeta (ast, t, Stripped Refl)) p =
+--     LBeta (atBeta ast p, LblAt Proxy t, Stripped Refl)
+-- -- todo: not sure if 'atBetaL' and 'atEtaL' should have a 'Place r' argument or
+-- --       produce an AST which expects a 'Place r'.
+-- -- todo: also not sure if building a 'LblRep' alongside the labelled 'Beta' and
+-- --       'Eta' is necessary yet.
 
-atEtaL :: forall sym r qs sig l
-    .  (Rgn :<: sym, Remove ('Put r) qs ~ qs)
-    => LEta sym qs sig l
-    -> Place r
-    -> LBeta sym ('Put r ':. qs) sig (l ':^ r)
-atEtaL (LEta (ast, t, Stripped Refl)) p =
-    LBeta (atEta ast p, LblAt Proxy t, Stripped Refl)
+-- atEtaL :: forall sym r qs sig l
+--     .  (Rgn :<: sym, Remove ('Put r) qs ~ qs)
+--     => LEta sym qs sig l
+--     -> Place r
+--     -> LBeta sym ('Put r ':. qs) sig (l ':^ r)
+-- atEtaL (LEta (ast, t, Stripped Refl)) p =
+--     LBeta (atEta ast p, LblAt Proxy t, Stripped Refl)
 
 --------------------------------------------------------------------------------
 -- When annotating an 'ASTF q a' only the result 'a' is visible, so we cannot
@@ -216,58 +217,50 @@ atEtaL (LEta (ast, t, Stripped Refl)) p =
 -- we havent altered the original programs "meaning".
 --------------------------------------------------------------------------------
 
--- data ExLAST c sym p sig where
---     Ex :: (p qs, Strip l ~ sig)
---        => c sym qs sig l
---        -> QualRep qs
---        -> ExLAST c sym p sig
---   LBeta sym qs sig l = (Beta sym qs sig, LblRep l, l :~~: sig)
---   LEta  sym qs sig l = (Eta  sym qs sig, LblRep l, l :~~: sig)
---   ExLBeta = ExLAST LBeta
---   ExLEta  = ExLAST LEta
+type LBeta :: forall r . Signature (Put r) * -> *
+data LBeta sig where
+    LSym :: LBeta sig
+    LApp :: LBeta (a 'S.:-> sig) -> LEta a -> LBeta sig
+    LEv  :: LBeta (p 'S.:=> sig) -> Proxy p -> LBeta sig
 
-type LblArg :: forall r . Label r * -> *
-data LblArg l where
-  
+type LEta :: forall r . Signature (Put r) * -> *
+data LEta sig where
+    LSpine :: LEta ('S.Const a)
+    LAbs   :: Sig a => LEta sig -> LEta (a 'S.:-> sig)
+    LPre   :: Proxy p -> LEta sig -> LEta (p 'S.:=> sig)
+-- todo: actually label things.
+
+--------------------------------------------------------------------------------
+
+type ExLBeta :: forall r . (Symbol (Put r) *) -> (Qualifier (Put r) -> Constraint) -> (Signature (Put r) *) -> *
+data ExLBeta sym p sig where
+    ExLBeta :: (p qs) --, Strip l ~ sig)
+        => Beta sym qs sig
+        -> LBeta sig -- LblRep l
+        -> QualRep qs
+        -> ExLBeta sym p sig
+
+type ExLEta :: forall r . (Symbol (Put r) *) -> (Qualifier (Put r) -> Constraint) -> (Signature (Put r) *) -> *
+data ExLEta sym p sig where
+    ExLEta :: (p qs) --, Strip l ~ sig)
+        => Eta sym qs sig
+        -> LEta sig -- LblRep l
+        -> QualRep qs
+        -> ExLEta sym p sig
+-- todo: figure out how to clean up any matching mess on these with patterns.
 
 class    (Extends ps qs ~ True) => (>=) ps qs
 instance (Extends ps qs ~ True) => (>=) ps qs
 
-type ExLBeta :: forall r
-    .  (Symbol (Put r) *)
-    -> (Qualifier (Put r) -> Constraint)
-    -> (Signature (Put r) *)
-    -> *
-data ExLBeta sym p sig where
-    ExLBeta :: (p qs, Strip l ~ sig)
-        => Beta sym qs sig
-        -> LblRep l
-        -> QualRep qs
-        -> ExLBeta sym p sig
-
-type ExLEta :: forall r
-    .  (Symbol (Put r) *)
-    -> (Qualifier (Put r) -> Constraint)
-    -> (Signature (Put r) *)
-    -> *
-data ExLEta sym p sig where
-    ExLEta :: (p qs, Strip l ~ sig)
-        => Eta sym qs sig
-        -> LblRep l
-        -> QualRep qs
-        -> ExLEta sym p sig
-
--- pattern LB beta l r = LBeta (beta, l, r)
--- pattern LE eta  l r = LEta  (eta, l, r)
--- todo: figure out how to clean up the matching mess with patterns.
+--------------------------------------------------------------------------------
 
 annotateBeta ::
-    forall r (sym :: Symbol (Put r) *)
-             (qs  :: Qualifier (Put r))
-             (ps  :: Qualifier (Put r))
+    forall r (sym :: Symbol     (Put r) *)
+             (qs  :: Qualifier  (Put r))
+             (ps  :: Qualifier  (Put r))
              (rs  :: T.QualArgs (Put r))
-             (eps :: Qualifier (Put r))
-             (sig :: Signature (Put r) *)
+             (eps :: Qualifier  (Put r))
+             (sig :: Signature  (Put r) *)
              (a   :: *)
     .  ( Sym sym
        , a     ~ Result sig
@@ -276,40 +269,42 @@ annotateBeta ::
        )
     => Beta sym eps sig
     -> Args sym rs  sig
+    -> LBeta sig
     -> QualRep eps
     -> QualRep ps
     -> (ExLBeta sym ((>=) qs) ('S.Const a), QualRep qs)
-annotateBeta b Nil eps ps
+annotateBeta b Nil l eps ps
     --
     | Refl :: qs :~: SmartApply ps 'T.Empty <- Refl
     , Refl :: qs :~: ps <- Refl
+    , Refl :: sig :~: ('S.Const a) <- Refl
     , Dict :: Dict (Typeable a) <- undefined
     --
-    = let b'   = b  :: Beta sym eps ('S.Const a) in
-      let ps'  = ps :: QualRep ps in
+    = let b'   = b   :: Beta sym eps ('S.Const a) in
+      let ps'  = ps  :: QualRep ps in
       let eps' = eps :: QualRep eps in
-      let l    = LblConst :: LblRep ('Const a) in
+      let l'   = l   :: LBeta @r ('S.Const a) in
       --
-      (ExLBeta b' l eps', ps')
--- todo: this l is useless, as it forgets the whole application of 'sig' so far.
-annotateBeta b ((e :: Eta sym xs x) :* (as :: Args sym ys y)) eps ps
+      (ExLBeta b' l' eps', ps')
+annotateBeta b ((e :: Eta sym xs x) :* (as :: Args sym ys y)) l eps ps
     --
-    | ( ExLEta (e' :: Eta sym exs x) (l :: LblRep l) (exs :: QualRep exs)
+    | ( ExLEta (e' :: Eta sym exs x) (l' :: LEta x) (exs :: QualRep exs)
       , (xs :: QualRep xs))
         <- annotateEta e
     -- exs ~ qs2, xs ~ ps1
     , Refl :: Extends xs exs :~: 'True <- Refl
     , Refl :: Extends ps eps :~: 'True <- Refl
-    , Refl :: Strip l :~: x <- Refl
+  --, Refl :: Strip l :~: x <- Refl
     , Refl :: rs :~: 'T.Fun xs ys <- Refl
     , Refl :: Extends (Union ps xs) (Union eps exs) :~: 'True <- undefined
     --
     = let b'   = b :$ e' :: Beta sym (Union eps exs) y in
       let ps'  = union ps xs :: QualRep (Union ps xs) in
       let eps' = union eps exs :: QualRep (Union eps exs) in
+      let l''  = LApp l l' :: LBeta y in
       --
-      annotateBeta b' as eps' ps'
-annotateBeta b ((p :: Ev x) :~ (as :: Args sym ys y)) eps ps
+      annotateBeta b' as l'' eps' ps'
+annotateBeta b ((p :: Ev x) :~ (as :: Args sym ys y)) l eps ps
     -- 
     | Refl :: qs :~: SmartApply ps ('T.Pre x ys) <- Refl
     , Dict :: Dict (Typeable x) <- undefined
@@ -317,8 +312,9 @@ annotateBeta b ((p :: Ev x) :~ (as :: Args sym ys y)) eps ps
     = let b'   = b :# p :: Beta sym (x ':. eps) y in
       let ps'  = QualPred (Proxy :: Proxy x) ps :: QualRep (x ':. ps) in
       let eps' = QualPred (Proxy :: Proxy x) eps :: QualRep (x ':. eps) in
+      let l'   = LEv l (Proxy :: Proxy x) :: LBeta y in
       --
-      annotateBeta b' as eps' ps'
+      annotateBeta b' as l' eps' ps'
 
 annotateEta :: forall r (sym :: Symbol (Put r) *)
                         (ps  :: Qualifier (Put r))
@@ -326,30 +322,45 @@ annotateEta :: forall r (sym :: Symbol (Put r) *)
     .  Sym sym
     => Eta sym ps sig
     -> (ExLEta sym ((>=) ps) sig, QualRep ps)
-annotateEta (Spine b)
-    | ( ExLBeta (b' :: Beta sym xs a) (l :: LblRep l) (eps :: QualRep xs)
+annotateEta (Spine (b :: Beta sym ps ('S.Const a)))
+    | ( ExLBeta (b'  :: Beta sym xs ('S.Const a))
+                (_   :: LBeta ('S.Const a))
+                (eps :: QualRep xs)
       , (ps :: QualRep qs))
         <- annotate b
-    = --
-      ( ExLEta (Spine b') l eps
-      , ps)
+    --
+    = let e' = Spine b' :: Eta sym xs ('S.Const a) in
+      let l' = LSpine :: LEta @r ('S.Const a) in
+      --
+      (ExLEta e' l' eps, ps)
+-- todo: 'l' from 'annotate' is discarded here so I need to make sure it's "in"
+--       'b' already.
 annotateEta ((n :: Name) :\ (e :: Eta sym qs a))
-    | ( ExLEta (e' :: Eta sym xs a) (l :: LblRep l) (eps :: QualRep xs)
+    | ( ExLEta (e'  :: Eta sym xs a)
+               (l   :: LEta x)
+               (eps :: QualRep xs)
       , (ps :: QualRep qs))
         <- annotateEta e
-    = --
-      let a = arg (Proxy :: Proxy sig) in
-      witSDIso a |-
+    --
+    , Refl :: sig :~: (b 'S.:-> a) <- Refl
+    , Dict :: Dict (Sig b) <- Dict
+    --
+    = let b    = signature :: SigRep b in
+      let e''  = n :\ e' :: Eta sym xs (b 'S.:-> a) in
+      let l'   = LAbs l :: LEta (b 'S.:-> a) in
+      let eps' = eps :: QualRep xs in
+      let ps'  = ps :: QualRep qs in
       --
-      ( ExLEta (n :\ e') (LblPart (dress a) l) eps
-      , ps)
+      witSDIso b |- (ExLEta e'' l' eps', ps')
   where
     arg :: forall a b . Sig a => Proxy (a 'S.:-> b) -> SigRep a
     arg _ = signature
 -- note: would be nice to match on the exisential types in 'Beta'/'Eta' instead.
 --       ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/type_applications.html#type-applications-in-patterns
 annotateEta ((p :: Ev q) :\\ (e :: Eta sym qs a))
-    | ( ExLEta (e' :: Eta sym xs a) (l :: LblRep l) (eps :: QualRep xs)
+    | ( ExLEta (e'  :: Eta sym xs a)
+               (l   :: LEta a)
+               (eps :: QualRep xs)
       , (qs :: QualRep qs))
         <- annotateEta e
       --
@@ -361,14 +372,12 @@ annotateEta ((p :: Ev q) :\\ (e :: Eta sym qs a))
     , Refl :: Extends (Remove q qs) (Remove q xs) :~: 'True
         <- W.witExtShrink (Proxy :: Proxy q) qs eps Refl
     = --
-      let (e''  :: Eta sym (Remove q xs) (q 'S.:=> a)) = p :\\ e' in
-      let (l'   :: LblRep (q ':=> l)) = LblPred Proxy l in
-      let (r    :: (q ':=> l) :~~: (q 'S.:=> a)) = Stripped Refl in
-      let (eps' :: QualRep (Remove q xs)) = remove (Proxy :: Proxy q) eps in
-      let (qs'  :: QualRep (Remove q qs)) = remove (Proxy :: Proxy q) qs in
+      let e''  = p :\\ e'  :: Eta sym (Remove q xs) (q 'S.:=> a) in
+      let l'   = LPre (Proxy :: Proxy q) l :: LEta (q 'S.:=> a) in
+      let eps' = remove (Proxy :: Proxy q) eps :: QualRep (Remove q xs) in
+      let qs'  = remove (Proxy :: Proxy q) qs  :: QualRep (Remove q qs) in
       --
-      ( ExLEta e'' l' eps'
-      , qs')
+      (ExLEta e'' l' eps', qs')
 
 annotate :: forall r (sym :: Symbol (Put r) *)
                      (qs :: Qualifier (Put r))
@@ -384,7 +393,7 @@ annotate = constMatch matchSym undefined
         => sym sig
         -> Args sym ps sig
         -> (ExLBeta sym ((>=) qs) ('S.Const a), QualRep qs)
-    matchSym s as = annotateBeta (Sym s) as (QualNone) (QualNone)
+    matchSym s as = annotateBeta (Sym s) as (LSym) (QualNone) (QualNone)
 
 --------------------------------------------------------------------------------
 -- Fin.

@@ -88,6 +88,7 @@ data Eta sym qs sig where
 --  (:\\) :: Ev q -> Eta sym (q ':. qs) sig -> Eta sym qs (q ':=> sig) 
     (:\\) :: (Elem q qs ~ 'True, Typeable q) => Ev q -> Eta sym qs sig -> Eta sym (Remove q qs) (q ':=> sig)
 -- todo: clean up the new constraints.
+-- todo: does ev-abs. not also abs. qualifiers assoc. with 'a'? No... right?
 
 infixl 1 :$, :#
 infixr 9 :\, :\\
