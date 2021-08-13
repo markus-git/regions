@@ -4,9 +4,9 @@ module Language.Diorite.Decoration
     (
     -- * Symbol decorations.
       (:&:)(..)
-    , decorate
-    , strip
     , smartSymDecor
+    , decorate
+    , stripDecor
     ) where
 
 import Language.Diorite.Signatures (Signature, Result, Sig)
@@ -66,16 +66,16 @@ decorate f (b :$ e)    = decorate f b :$ decorateEta e
     decorateEta (Spine b') = Spine (decorate f b')
 
 -- | Strip decorations from every symbol node.
-strip :: Beta (sym :&: info) qs sig -> Beta sym qs sig
-strip (Var n)  = Var n
-strip (Sym s)  = Sym (_sym s)
-strip (b :# p) = strip b :# p
-strip (b :$ e) = strip b :$ stripEta e
+stripDecor :: Beta (sym :&: info) qs sig -> Beta sym qs sig
+stripDecor (Var n)  = Var n
+stripDecor (Sym s)  = Sym (_sym s)
+stripDecor (b :# p) = stripDecor b :# p
+stripDecor (b :$ e) = stripDecor b :$ stripEta e
   where
     stripEta :: Eta (sym :&: info) qs sig -> Eta sym qs sig
     stripEta (n :\  e') = n :\  stripEta e'
     stripEta (p :\\ e') = p :\\ stripEta e'
-    stripEta (Spine b') = Spine (strip b')
+    stripEta (Spine b') = Spine (stripDecor b')
 
 --------------------------------------------------------------------------------
 -- Fin.
