@@ -8,6 +8,7 @@ module Language.Diorite.Signatures
       Signature(..)
     , Result
     , Erasure
+    , Predicate
     , SigRep(..)
     , Sig(..)
     -- ** ...
@@ -38,9 +39,9 @@ data Signature p a =
 infixr 2 :->, :=>
 
 -- | Denotational result of a symbol's signature.
-type Result :: forall p . Signature p * -> *
+type Result :: forall p . Signature p * -> Signature p *
 type family Result sig where
-    Result ('Const a) = a
+    Result ('Const a) = 'Const a
     Result (_ ':-> b) = Result b
     Result (_ ':=> a) = Result a
 
@@ -50,6 +51,11 @@ type family Erasure sig  where
     Erasure ('Const a) = 'Const a
     Erasure (a ':-> b) = Erasure a ':-> Erasure b
     Erasure (_ ':=> a) = Erasure a
+
+-- | ...
+type Predicate :: forall p . Signature p * -> *
+type family Predicate sig where
+    Predicate (_ :: Signature p *) = p
 
 --------------------------------------------------------------------------------
 -- ** Rep. of a valid signature.

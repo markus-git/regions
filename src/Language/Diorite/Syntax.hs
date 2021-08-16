@@ -61,7 +61,7 @@ import Data.Type.Equality ((:~:)(..))
 type Name = Int
 
 -- | Evidence names, associated with some 'q'.
-newtype Ev q = Ev Name
+data Ev q = Typeable q => Ev Name
 
 -- | Kind short-hand for symbols.
 type Symbol p a = Signature p a -> a
@@ -86,7 +86,7 @@ data Eta sym qs sig where
     (:\)  :: Sig a => Name -> Eta sym qs sig -> Eta sym qs (a ':-> sig)
     -- ^ Evidence-abstraction.
 --  (:\\) :: Ev q -> Eta sym (q ':. qs) sig -> Eta sym qs (q ':=> sig) 
-    (:\\) :: (Elem q qs ~ 'True, Typeable q) => Ev q -> Eta sym qs sig -> Eta sym (Remove q qs) (q ':=> sig)
+    (:\\) :: (Elem q qs ~ 'True) => Ev q -> Eta sym qs sig -> Eta sym (Remove q qs) (q ':=> sig)
 -- todo: clean up the new constraints.
 -- todo: does ev-abs. not also abs. qualifiers assoc. with 'a'? No... right?
 

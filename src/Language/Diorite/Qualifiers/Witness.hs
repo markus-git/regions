@@ -462,7 +462,7 @@ witEURefl (QualPred (a :: P q) (as :: Q qs)) b c | Refl <- witElemUniRefl a b c 
       Right Refl -> Refl
 
 witEUBoth :: forall a b c d . Q a -> Q b -> Q c -> Q d -> Extends a b :~: 'True -> Extends c d :~: 'True -> Extends (Union a c) (Union b d) :~: 'True
-witEUBoth = undefined
+witEUBoth = Unsafe.unsafeCoerce Refl
 
 --------------------------------------------------------------------------------
 -- Subset & Union (SU).

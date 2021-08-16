@@ -3,44 +3,58 @@
 module Rgn where
 
 import Language.Diorite.Signatures
+--import qualified Language.Diorite.Signatures as S
+import Language.Diorite.Qualifiers
 import Language.Diorite.Syntax
+import Language.Diorite.Decoration
 import Language.Diorite.Interpretation
-import qualified Language.Diorite.Signatures as S
-import qualified Language.Diorite.Region.Annotation as A
+import qualified Language.Diorite.Region.Annotate as A
 
 --------------------------------------------------------------------------------
 -- * ...
 --------------------------------------------------------------------------------
 
-data SL a where
-    SX :: SL ('S.Const Int 'S.:-> 'S.Const Int)
-    SY :: SL ('S.Const Int 'S.:-> 'S.Const Int 'S.:-> 'S.Const Int)
+data D a where
+    X :: Int -> D ('Const Int)
+    Y :: D ('Const Int ':-> 'Const Int)
+    Z :: D ('Const Int ':-> 'Const Int ':-> 'Const Int)
 
-instance Render SL where
-    renderSym (SX) = "SX"
-    renderSym (SY) = "SY"
+instance Sym D where
+    symbol (X _) = signature
+    symbol (Y)   = signature
+    symbol (Z)   = signature
 
-type BS a = Beta SL 'None ('S.Const a)
+instance Render D where
+    renderSym (X i) = show i
+    renderSym (Y)   = "-"
+    renderSym (Z)   = "+"
+
+type B :: * -> *
+type B a = Beta D ('None :: Qualifier (A.Put *)) ('Const a)
 
 --------------------------------------------------------------------------------
 
-data TL a where
-    TX :: TL ( 'A.Put r1 'A.:=>
-               'A.Put r2 'A.:=>
-               'A.Const Int 'A.:^ r1 'A.:->
-               'A.Const Int 'A.:^ r2 )
-    TY :: TL ( 'A.Put r1 'A.:=>
-               'A.Put r2 'A.:=>
-               'A.Put r3 'A.:=>
-               'A.Const Int 'A.:^ r1 'A.:->
-               'A.Const Int 'A.:^ r2 'A.:->
-               'A.Const Int 'A.:^ r3 )
+int :: Int -> B Int
+int = smartSym' . X
 
-instance Render TL where
-    renderSym (TX) = "TX"
-    renderSym (TY) = "TY"
+neg :: B Int -> B Int
+neg = smartSym' Y
 
-type BT qs a = Beta () qs ('S.Const a)
+add :: B Int -> B Int -> B Int
+add = smartSym' Z
+
+ex :: B Int
+ex = add (int 1) (neg (int 2))
+
+--------------------------------------------------------------------------------
+
+type E a = A.ExLBeta (D :&: A.LBeta) ((A.>=) 'None) ('Const a :: Signature (A.Put *) *)
+
+ann :: B Int -> E Int
+ann x = let (b, _) = A.annotate x in b
+
+pr :: E Int -> String
+pr (A.ExLBeta b _) = show b
 
 --------------------------------------------------------------------------------
 -- Fin.
