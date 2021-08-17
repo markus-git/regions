@@ -409,9 +409,23 @@ annotate = constMatch matchSym undefined
         -> ( ExLBeta (sym :&: LBeta) ((>=) qs) ('S.Const a)
            , QualRep qs)
     matchSym s as =
-        let (b, l, qs) =
-              annotateBeta (Sym (s :&: l)) as (LSym) (QualNone) (QualNone)
-        in (b, qs)
+        let (b, l, qs) = annotateBeta (Sym (s :&: l)) as (LSym) (QualNone) (QualNone) in (b, qs)
+        --let (b, l, qs) = annotateBeta (Sym (s :&: undefined)) as (LSym) (QualNone) (QualNone) in (swap b l, qs)
+
+    swap :: ExLBeta (sym :&: LBeta) ((>=) qs) ('S.Const a)
+         -> LBeta @r ('S.Const a)
+         -> ExLBeta (sym :&: LBeta) ((>=) qs) ('S.Const a)
+    swap (ExLBeta b eqs) l = ExLBeta (swapDecor b l) eqs
+
+    swapDecor :: forall (ps  :: Qualifier (Put r))
+                        (sig :: Signature (Put r) *)
+        .  ('S.Const a ~ Result sig)
+        => Beta (sym :&: LBeta) ps sig
+        -> LBeta @r ('S.Const a)
+        -> Beta (sym :&: LBeta) ps sig
+    swapDecor (Sym s)  l = Sym (_sym s :&: l)
+    swapDecor (b :# p) l = swapDecor b l :# p
+    swapDecor (b :$ e) l = swapDecor b l :$ e
 
 --------------------------------------------------------------------------------
 -- Fin.

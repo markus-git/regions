@@ -75,8 +75,10 @@ type T = Typeable
 type P = Proxy
 type Q = QualRep
 
-absurd :: 'True :~: 'False -> a
-absurd x = case x of {}
+--absurd :: 'True :~: 'False -> a
+--absurd x = case x of {}
+
+--------------------------------------------------------------------------------
 
 witEqRefl :: forall a b . (T a, T b) => P a -> P b -> (a == b) :~: (b == a)
 witEqRefl a b =
@@ -458,7 +460,8 @@ witEURefl (QualPred (a :: P q) (as :: Q qs)) b c | Refl <- witElemUniRefl a b c 
   case testElem a (union b c) of
       Left  Refl
           | Refl :: Extends qs (Union b c) :~: Extends qs (Union c b) <- witEURefl as b c
-          -> (undefined :: Extends qs (Remove q (Union b c)) :~: Extends qs (Remove q (Union c b)))
+          -> Unsafe.unsafeCoerce Refl
+            -- (undefined :: Extends qs (Remove q (Union b c)) :~: Extends qs (Remove q (Union c b)))
       Right Refl -> Refl
 
 witEUBoth :: forall a b c d . Q a -> Q b -> Q c -> Q d -> Extends a b :~: 'True -> Extends c d :~: 'True -> Extends (Union a c) (Union b d) :~: 'True
