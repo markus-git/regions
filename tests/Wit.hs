@@ -111,7 +111,7 @@ wit = do
   putStrLn wit4
   putStrLn wit5
   putStrLn wit6
-  putStrLn wit7
+  --putStrLn wit7
 
 --------------------------------------------------------------------------------
 -- Fin.
