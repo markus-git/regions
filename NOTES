@@ -217,3 +217,53 @@ smartSym' ex sym = smartBeta ex (signature :: SigRep sig) (Sym sym)
         -- b1 > Context b ~ Context (a->b)
         let res = b1 :: Eta @p (Domain b) (Context (a->b)) (Internal b) in
         res)
+
+--------------------------------------------------------------------------------
+-- What we (sorta) have:
+--
+-- > beta :: B [] ('Int -> 'Int -> 'Int)
+-- > beta = \x. \y. x + y
+--
+-- What we (sorta) want:
+--
+-- > beta :: B [1,2,3,4,5] ('Int^1 ->^2 'Int^3 ->^4 'Int^5)
+-- > beta = (\x . (\y . (local <1,3> in (x + y)) at 5) at 4) at 2
+--   ~alternatively~
+-- > beta = \x .^2 \y .^4 local <1,3> in (x + y)^5
+--
+-- note: rules must now match on "sym a at r" and "\x . e at r"
+-- instead of just "sym a" and "\x . e" with a rule for "e at r".
+--
+-- What we (sorta) need to support:
+--
+-- Terms for region annotations:
+-- > local r in E  where  local :: AST (r : rs) 'Int -> AST rs 'Int
+-- > E at r        where  at    :: AST rs 'Int       -> AST ...
+--
+-- Symbol signatures extended with region annotations:
+-- > t ::= a | t -> t | p => t | t ^ Put r
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+-- When annotating an 'ASTF q a' only the result 'a' is visible, so we cannot
+-- determine the resulting annotations/labels from its type alone.
+--
+-- So I (sorta) need something like:
+--
+-- > annotate :: ASTF q a -> exists p b. LASTF p b where (p >= q) (Strip b ~ a)
+--
+-- Since I treat qualifiers like a set (or rather a list), 'P >= Q' simply means
+-- that 'P' is a subset of 'Q'. But the annotation will never remove qualifiers
+-- from 'P', so 'Q' really contains every qualifier in 'P' (even its duplicates
+-- because of the list-masquerading-as-a-set thingy).
+--
+-- 'Strip' simply removes all annotations from a signature and indicates that
+-- we havent altered the original programs "meaning".
+--
+-- note:
+--   would be nice to match on the exisential types in 'Beta'/'Eta' instead of
+--   binding it in the 'sig' equality. Couldn't get it to work tho...
+--   ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/type_applications.html#type-applications-in-patterns
+--
+--------------------------------------------------------------------------------

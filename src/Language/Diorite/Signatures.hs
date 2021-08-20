@@ -103,8 +103,8 @@ testConst SigConst SigConst = eqT
 
 -- | Extract a witness of equality of two types.
 testSig :: SigRep a -> SigRep b -> Maybe (a :~: b)
-testSig a1@(SigConst) a2@(SigConst)
-    | Just Refl <- testConst a1 a2
+testSig a@(SigConst) b@(SigConst)
+    | Just Refl <- testConst a b
     = Just Refl
 testSig (SigPart a1 b1) (SigPart a2 b2)
     | Just Refl <- testSig a1 a2
