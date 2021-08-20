@@ -20,7 +20,5 @@ cabal.project.local*
 cabal.project
 .ghc.environment.*
 
-feldspar/
-old/
+concept/
 notes/
-*.old
