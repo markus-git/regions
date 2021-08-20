@@ -18,16 +18,20 @@ data D a where
     X :: Int -> D ('Const Int)
     Y :: D ('Const Int ':-> 'Const Int)
     Z :: D ('Const Int ':-> 'Const Int ':-> 'Const Int)
+    --
+    A :: D ('Const Int ':-> ('Const Int ':-> 'Const Int) ':-> 'Const Int)
 
 instance Sym D where
     symbol (X _) = signature
     symbol (Y)   = signature
     symbol (Z)   = signature
+    symbol (A)   = signature
 
 instance Render D where
     renderSym (X i) = show i
     renderSym (Y)   = "-"
     renderSym (Z)   = "+"
+    renderSym (A)   = "let"
 
 type B :: * -> *
 type B a = Beta D ('None :: Qualifier (A.Put *)) ('Const a)
@@ -43,18 +47,24 @@ neg = smartSym' Y
 add :: B Int -> B Int -> B Int
 add = smartSym' Z
 
-ex :: B Int
-ex = add (int 1) (neg (int 2))
+share :: B Int -> (B Int -> B Int) -> B Int
+share = smartSym' A
+
+ex1 :: B Int
+ex1 = add (int 1) (neg (int 2))
+
+ex2 :: B Int
+ex2 = share (int 2) (\x -> add (int 1) x)
 
 --------------------------------------------------------------------------------
 
 type E a = A.ExLBeta (D :&: A.LBeta) ((A.>=) 'None) ('Const a :: Signature (A.Put *) *)
 
 ann :: B Int -> E Int
-ann x = let (b, _) = A.annotate x in b
+ann = A.annotate
 
-pr :: E Int -> String
-pr (A.ExLBeta b _) = show b
+pr :: E Int -> IO ()
+pr (A.ExLBeta b _) = putStrLn (show b)
 
 --------------------------------------------------------------------------------
 -- Fin.

@@ -29,13 +29,14 @@ module Language.Diorite.Qualifiers
     , remove
     , union
     -- ** ...
+    , testQual
     , witQual
     ) where
 
 import Data.Constraint (Dict(..))
 import Data.Proxy (Proxy(..))
 import Data.Type.Equality ((:~:)(..), testEquality)
-import Data.Typeable (Typeable)
+import Data.Typeable (Typeable, eqT)
 import Type.Reflection (TypeRep, typeRep)
 import qualified Unsafe.Coerce as Unsafe (unsafeCoerce)
 
@@ -140,9 +141,10 @@ type (:/~:) a b = (a == b) :~: 'False
 
 -- | Check whether 'a' and 'b' are equal or not.
 test :: forall k (a :: k) (b :: k) . (Typeable a, Typeable b) => Proxy a -> Proxy b -> Either (a :~: b) (a :/~: b)
-test _ _ = case testEquality (typeRep :: TypeRep a) (typeRep :: TypeRep b) of
-    Just Refl -> Left Refl
-    Nothing   -> Right (Unsafe.unsafeCoerce Refl)
+test _ _ =
+    case testEquality (typeRep :: TypeRep a) (typeRep :: TypeRep b) of
+        Just Refl -> Left Refl
+        Nothing   -> Right (Unsafe.unsafeCoerce Refl)
 
 -- | Check whether 'a' is an "element" of 'b' or not.
 testElem :: forall k (a :: k) (b :: Qualifier k) . Typeable a => Proxy a -> QualRep b -> Either (Elem a b :~: 'True) (Elem a b :~: 'False)
@@ -155,15 +157,15 @@ insert :: Typeable p => Proxy p -> QualRep qs -> QualRep (Insert p qs)
 insert p (QualNone)      = QualPred p QualNone
 insert p (QualPred q qs) =
     case test p q of
-      Left  Refl -> QualPred q qs
-      Right Refl -> QualPred q (insert p qs)
+        Left  Refl -> QualPred q qs
+        Right Refl -> QualPred q (insert p qs)
 
 remove :: Typeable p => Proxy p -> QualRep qs -> QualRep (Remove p qs)
 remove _ (QualNone)      = QualNone
 remove p (QualPred q qs) =
     case test p q of
-      Left  Refl -> qs
-      Right Refl -> QualPred q (remove p qs)
+        Left  Refl -> qs
+        Right Refl -> QualPred q (remove p qs)
 
 union :: QualRep ps -> QualRep qs -> QualRep (Union ps qs)
 union (QualNone)      qs = qs
@@ -171,6 +173,15 @@ union (QualPred p ps) qs = QualPred p (union ps (remove p qs))
 
 --------------------------------------------------------------------------------
 -- ** ...
+
+-- | ...
+testQual :: QualRep a -> QualRep b -> Maybe (a :~: b)
+testQual (QualNone) (QualNone) = Just Refl
+testQual (QualPred (_ :: Proxy p) as) (QualPred (_ :: Proxy q) bs)
+    | Just Refl :: Maybe (p :~: q) <- eqT
+    , Just Refl <- testQual as bs
+    = Just Refl
+testQual _ _ = Nothing
 
 -- | ...
 witQual :: QualRep qs -> Dict (Qual qs)

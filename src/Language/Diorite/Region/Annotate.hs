@@ -6,7 +6,7 @@
 
 module Language.Diorite.Region.Annotate where
 
-import Language.Diorite.Signatures (Signature, Result, SigRep(..), Sig(..))
+import Language.Diorite.Signatures (Signature, Result, SigRep(..), Sig(..), testSig)
 import qualified Language.Diorite.Signatures as S (Signature(..))
 import Language.Diorite.Qualifiers
 import qualified Language.Diorite.Qualifiers.Witness as W
@@ -19,6 +19,7 @@ import Data.Constraint (Constraint, Dict(..))
 import Data.Proxy (Proxy(..))
 import Data.Type.Equality ((:~:)(..))
 import Data.Typeable (Typeable)
+import qualified Data.IntMap as M
 
 --------------------------------------------------------------------------------
 -- What we (sorta) have:
@@ -163,8 +164,6 @@ witSDIso (SigConst) = Refl
 witSDIso (SigPart a b) | Refl <- witSDIso a, Refl <- witSDIso b = Refl
 witSDIso (SigPred _ a) | Refl <- witSDIso a = Refl
 
---removeL :: Proxy q -> LblRep lbl -> LblRep (Remove q lbl)
-
 --------------------------------------------------------------------------------
 -- ** ...
 
@@ -214,6 +213,12 @@ witSDIso (SigPred _ a) | Refl <- witSDIso a = Refl
 --
 -- 'Strip' simply removes all annotations from a signature and indicates that
 -- we havent altered the original programs "meaning".
+--
+-- note:
+--   would be nice to match on the exisential types in 'Beta'/'Eta' instead of
+--   binding it in the 'sig' equality. Couldn't get it to work tho...
+--   ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/type_applications.html#type-applications-in-patterns
+--
 --------------------------------------------------------------------------------
 
 type LBeta :: forall r . Signature (Put r) * -> *
@@ -234,52 +239,71 @@ data LEta sig where
 
 --------------------------------------------------------------------------------
 
+data Hidden sym where
+  Hide :: Beta (sym :&: LBeta) eps sig
+       -> LBeta sig
+       -> SigRep sig
+       -> QualRep ps
+       -> QualRep eps
+       -> 'True :~: Extends ps eps
+       -> Hidden sym
+
+data Store sym = Store (M.IntMap (Hidden sym))
+
+store :: Name -> Hidden sym -> Store sym -> Store sym
+store name v (Store m) = Store $ M.insert name v m
+
+lookupBeta ::
+  forall r (sym :: Symbol (Put r) *)    (qs  :: Qualifier (Put r))
+           (ps  :: Qualifier (Put r))   (rs  :: T.QualArgs (Put r))
+           (sig :: Signature (Put r) *) (a   :: *)
+    .  ( 'S.Const a ~ Result sig
+       , qs ~ SmartApply ps rs
+       , Sym sym
+       , Sig sig )
+    => Name -> Args sym rs sig -> SigRep sig -> QualRep ps -> Store sym
+    -> ( ExLBeta (sym :&: LBeta) ((>=) qs) ('S.Const a)
+       , QualRep qs )
+lookupBeta name as sig ps (Store m)
+    | Just (Hide b l sig' ps' eps Refl) <- M.lookup name m
+    , Just Refl <- testSig sig sig'
+    , Just Refl <- testQual ps ps'
+    , (b', l', qs) <- annotateBeta b as l eps ps (Store m)
+    = (b', qs)
+lookupBeta name _ _ _ _ = error $ "lookup failed on v" ++ show name ++ "!"
+
+--------------------------------------------------------------------------------
+
 type ExLBeta :: forall r . (Symbol (Put r) *) -> (Qualifier (Put r) -> Constraint) -> (Signature (Put r) *) -> *
 data ExLBeta sym p sig where
-    ExLBeta :: (p qs) --, Strip l ~ sig)
-        => Beta sym qs sig
-        -- -> LBeta sig -- LblRep l
-        -> QualRep qs
-        -> ExLBeta sym p sig
+    ExLBeta :: (p qs) => Beta sym qs sig -> QualRep qs -> ExLBeta sym p sig
 
 type ExLEta :: forall r . (Symbol (Put r) *) -> (Qualifier (Put r) -> Constraint) -> (Signature (Put r) *) -> *
 data ExLEta sym p sig where
-    ExLEta :: (p qs) --, Strip l ~ sig)
-        => Eta sym qs sig
-        -- -> LEta sig -- LblRep l
-        -> QualRep qs
-        -> ExLEta sym p sig
--- todo: figure out how to clean up any matching mess on these with patterns.
+    ExLEta :: (p qs) => Eta sym qs sig -> QualRep qs -> ExLEta sym p sig
 
 class    (Extends ps qs ~ True) => (>=) ps qs
 instance (Extends ps qs ~ True) => (>=) ps qs
 
---------------------------------------------------------------------------------
-
 annotateBeta ::
-    forall r (sym :: Symbol     (Put r) *)
-             (qs  :: Qualifier  (Put r))
-             (ps  :: Qualifier  (Put r))
-             (rs  :: T.QualArgs (Put r))
-             (eps :: Qualifier  (Put r))
-             (sig :: Signature  (Put r) *)
+    forall r (sym :: Symbol     (Put r) *) (qs  :: Qualifier  (Put r))
+             (ps  :: Qualifier  (Put r))   (rs  :: T.QualArgs (Put r))
+             (eps :: Qualifier  (Put r))   (sig :: Signature  (Put r) *)
              (a   :: *)
     .  ( Sym sym
        , 'S.Const a ~ Result sig
        , qs ~ SmartApply ps rs
-       , 'True ~ Extends ps eps
-       )
+       , 'True ~ Extends ps eps )
     => Beta (sym :&: LBeta) eps sig
     -> Args sym rs sig
-    -> LBeta sig
+    -> LBeta @r sig
     -> QualRep eps
     -> QualRep ps
+    -> Store sym
     -> ( ExLBeta (sym :&: LBeta) ((>=) qs) ('S.Const a)
        , LBeta @r ('S.Const a)
-       , QualRep qs
-       )
-annotateBeta b Nil l eps ps
-    --
+       , QualRep qs )
+annotateBeta b Nil l eps ps s
     | Refl :: qs :~: SmartApply ps 'T.Empty <- Refl
     , Refl :: qs :~: ps <- Refl
     , Refl :: sig :~: ('S.Const a) <- Refl
@@ -289,19 +313,14 @@ annotateBeta b Nil l eps ps
       let eps' = eps :: QualRep eps in
       let l'   = l   :: LBeta @r ('S.Const a) in
       --
-      ( ExLBeta b' eps'
-      , l'
-      , ps')
-annotateBeta b ((e :: Eta sym xs x) :* (as :: Args sym ys y)) l eps ps
-    --
+      ( ExLBeta b' eps', l', ps')
+annotateBeta b ((e :: Eta sym xs x) :* (as :: Args sym ys y)) l eps ps s
     | ( ExLEta (e' :: Eta (sym :&: LBeta) exs x) (exs :: QualRep exs)
       , (l' :: LEta x)
       , (xs :: QualRep xs))
-        <- annotateEta e
-    -- exs ~ qs2, xs ~ ps1
+        <- annotateEta e s
     , Refl :: Extends xs exs :~: 'True <- Refl
     , Refl :: Extends ps eps :~: 'True <- Refl
-  --, Refl :: Strip l :~: x <- Refl
     , Refl :: rs :~: 'T.Fun xs ys <- Refl
     , Refl :: Extends (Union ps xs) (Union eps exs) :~: 'True
         <- W.witEUBoth ps eps xs exs Refl Refl
@@ -311,9 +330,8 @@ annotateBeta b ((e :: Eta sym xs x) :* (as :: Args sym ys y)) l eps ps
       let eps' = union eps exs :: QualRep (Union eps exs) in
       let l''  = LApp l l' :: LBeta y in
       --
-      annotateBeta b' as l'' eps' ps'
-annotateBeta b ((Ev p :: Ev x) :~ (as :: Args sym ys y)) l eps ps
-    -- 
+      annotateBeta b' as l'' eps' ps' s
+annotateBeta b ((Ev p :: Ev x) :~ (as :: Args sym ys y)) l eps ps s
     | Refl :: qs :~: SmartApply ps ('T.Pre x ys) <- Refl
     , Dict :: Dict (Typeable x) <- Dict
     --
@@ -322,110 +340,102 @@ annotateBeta b ((Ev p :: Ev x) :~ (as :: Args sym ys y)) l eps ps
       let eps' = QualPred (Proxy :: Proxy x) eps :: QualRep (x ':. eps) in
       let l'   = LEv l (Proxy :: Proxy x) :: LBeta y in
       --
-      annotateBeta b' as l' eps' ps'
+      annotateBeta b' as l' eps' ps' s
 
-annotateEta :: forall r (sym :: Symbol (Put r) *)
-                        (ps  :: Qualifier (Put r))
-                        (sig :: Signature (Put r) *)
+annotateEta ::
+  forall r (sym :: Symbol (Put r) *)
+           (ps  :: Qualifier (Put r))
+           (sig :: Signature (Put r) *)
     .  Sym sym
     => Eta sym ps sig
+    -> Store sym
     -> ( ExLEta (sym :&: LBeta) ((>=) ps) sig
        , LEta @r sig
-       , QualRep ps
-       )
-annotateEta (Spine (b :: Beta sym ps ('S.Const a)))
+       , QualRep ps )
+annotateEta (Spine (b :: Beta sym ps ('S.Const a))) s
     | ( ExLBeta (b' :: Beta (sym :&: LBeta) xs ('S.Const a)) (eps :: QualRep xs)
-   -- , _  :: LBeta ('S.Const a)
       , ps :: QualRep qs)
-        <- annotate b
+        <- annotateAST b s
     --
     = let e' = Spine b' :: Eta (sym :&: LBeta) xs ('S.Const a) in
-      let l' = LSpine :: LEta @r ('S.Const a) in
+      let l' = LSpine   :: LEta @r ('S.Const a) in
       --
-      ( ExLEta e' eps
-      , l'
-      , ps)
--- todo: 'l' from 'annotate' is discarded here so I need to make sure it's "in"
---       'b' already.
-annotateEta ((n :: Name) :\ (e :: Eta sym qs a))
-    | ( ExLEta (e' :: Eta (sym :&: LBeta) xs a) (eps :: QualRep xs)
-      , l  :: LEta x
-      , ps :: QualRep qs)
-        <- annotateEta e
-    --
-    , Refl :: sig :~: (b 'S.:-> a) <- Refl
+      (ExLEta e' eps, l', ps)
+annotateEta ((n :: Name) :\ (e :: Eta sym qs a)) s
+    | Refl :: sig :~: (b 'S.:-> a) <- Refl
     , Dict :: Dict (Sig b) <- Dict
-    --
-    = let b    = signature :: SigRep b in
-      let e''  = n :\ e' :: Eta (sym :&: LBeta) xs (b 'S.:-> a) in
-      let l'   = LAbs l :: LEta (b 'S.:-> a) in
-      let eps' = eps :: QualRep xs in
-      let ps'  = ps :: QualRep qs in
+    = let b  = signature :: SigRep b in
+      let x  = Var n :: Beta (sym :&: LBeta) 'None b in
+      let xl = LSym :: LBeta b in
+      let xp = QualNone :: QualRep 'None in
+      let xh = Hide x xl b xp xp Refl :: Hidden sym in
+      let s' = store n xh s in
+      witSDIso b |-
       --
-      witSDIso b |- (ExLEta e'' eps', l', ps')
-  where
-    arg :: forall a b . Sig a => Proxy (a 'S.:-> b) -> SigRep a
-    arg _ = signature
--- note: would be nice to match on the exisential types in 'Beta'/'Eta' instead.
---       ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/type_applications.html#type-applications-in-patterns
-annotateEta ((Ev p :: Ev q) :\\ (e :: Eta sym qs a))
-    | ( ExLEta (e' :: Eta (sym :&: LBeta) xs a)
-               (eps :: QualRep xs)
+      case annotateEta e s' of
+        (ExLEta (e' :: Eta (sym :&: LBeta) xs a) (eps :: QualRep xs), l :: LEta x, ps  :: QualRep qs) ->
+          let e''  = n :\ e' :: Eta (sym :&: LBeta) xs (b 'S.:-> a) in
+          let l'   = LAbs l  :: LEta (b 'S.:-> a) in
+          let eps' = eps     :: QualRep xs in
+          let ps'  = ps      :: QualRep qs in
+          --
+          (ExLEta e'' eps', l', ps')
+annotateEta ((Ev p :: Ev q) :\\ (e :: Eta sym qs a)) s
+    | ( ExLEta (e' :: Eta (sym :&: LBeta) xs a) (eps :: QualRep xs)
       , l  :: LEta a
       , qs :: QualRep qs)
-        <- annotateEta e
-      --
+        <- annotateEta e s
     , Refl :: Extends qs xs :~: 'True <- Refl
     , Refl :: Elem q qs :~: 'True <- Refl
-      --
     , Refl :: Elem q xs :~: 'True
         <- W.witExtIn (Proxy :: Proxy q) qs eps Refl Refl
     , Refl :: Extends (Remove q qs) (Remove q xs) :~: 'True
         <- W.witExtShrink (Proxy :: Proxy q) qs eps Refl
-    = --
-      let e''  = Ev p :\\ e'  :: Eta (sym :&: LBeta) (Remove q xs) (q 'S.:=> a) in
-      let l'   = LPre (Proxy :: Proxy q) l :: LEta (q 'S.:=> a) in
+    --
+    = let e''  = Ev p :\\ e'                   :: Eta (sym :&: LBeta) (Remove q xs) (q 'S.:=> a) in
+      let l'   = LPre (Proxy :: Proxy q) l     :: LEta (q 'S.:=> a) in
       let eps' = remove (Proxy :: Proxy q) eps :: QualRep (Remove q xs) in
       let qs'  = remove (Proxy :: Proxy q) qs  :: QualRep (Remove q qs) in
       --
       (ExLEta e'' eps', l', qs')
+-- todo: not sure about the I rule...
+--------------------------------------------------------------------------------
 
-annotate :: forall r (sym :: Symbol (Put r) *)
+annotateAST :: forall r (sym :: Symbol (Put r) *)
                      (qs :: Qualifier (Put r))
                      (a :: *)
     .  Sym sym
     => ASTF sym qs a
+    -> Store sym
     -> ( ExLBeta (sym :&: LBeta) ((>=) qs) ('S.Const a)
        , QualRep qs)
-annotate = constMatch matchSym undefined
+annotateAST ast store = constMatch matchSym matchVar ast
   where
     matchSym :: forall (ps  :: T.QualArgs (Put r))
                        (sig :: Signature (Put r) *)
-        .  ( 'S.Const a ~ Result sig
-           , qs ~ SmartApply 'None ps
-           )
-        => sym sig
-        -> Args sym ps sig
+        .  ('S.Const a ~ Result sig, qs ~ SmartApply 'None ps)
+        => sym sig -> Args sym ps sig
         -> ( ExLBeta (sym :&: LBeta) ((>=) qs) ('S.Const a)
            , QualRep qs)
-    matchSym s as =
-        let (b, l, qs) = annotateBeta (Sym (s :&: l)) as (LSym) (QualNone) (QualNone) in (b, qs)
-        --let (b, l, qs) = annotateBeta (Sym (s :&: undefined)) as (LSym) (QualNone) (QualNone) in (swap b l, qs)
+    matchSym sym as =
+        let (b, l, qs) =
+              annotateBeta (Sym (sym :&: l)) as
+                  (LSym) (QualNone) (QualNone) store
+        in (b, qs)
 
-    swap :: ExLBeta (sym :&: LBeta) ((>=) qs) ('S.Const a)
-         -> LBeta @r ('S.Const a)
-         -> ExLBeta (sym :&: LBeta) ((>=) qs) ('S.Const a)
-    swap (ExLBeta b eqs) l = ExLBeta (swapDecor b l) eqs
+    matchVar :: forall (ps  :: T.QualArgs (Put r))
+                       (rs  :: Qualifier (Put r))
+                       (sig :: Signature (Put r) *)
+        .  ('S.Const a ~ Result sig, qs ~ SmartApply rs ps, Sig sig)
+        => Name -> QualRep rs -> Args sym ps sig
+        -> ( ExLBeta (sym :&: LBeta) ((>=) qs) ('S.Const a)
+           , QualRep qs)
+    matchVar name rs as = lookupBeta name as signature rs store
 
-    swapDecor :: forall (ps  :: Qualifier (Put r))
-                        (sig :: Signature (Put r) *)
-        .  ('S.Const a ~ Result sig)
-        => Beta (sym :&: LBeta) ps sig
-        -> LBeta @r ('S.Const a)
-        -> Beta (sym :&: LBeta) ps sig
-    swapDecor (Sym s)  l = Sym (_sym s :&: l)
-    swapDecor (b :# p) l = swapDecor b l :# p
-    swapDecor (b :$ e) l = swapDecor b l :$ e
+--------------------------------------------------------------------------------
+
+annotate :: Sym sym => ASTF sym qs a -> ExLBeta (sym :&: LBeta) ((>=) qs) ('S.Const a)
+annotate ast = let (b, _) = annotateAST ast (Store M.empty) in b
 
 --------------------------------------------------------------------------------
 -- Fin.
