@@ -7,6 +7,7 @@ module Language.Diorite.Region.Labels
     , Label(..)
     , Strip
     , Dress
+    , Plain
     , (:~~:)(..)
     -- ** ...
     , LblRep(..)
@@ -16,6 +17,7 @@ module Language.Diorite.Region.Labels
     -- ** ...
     , testLabel
     , witSDIso
+    , witSPlain
     -- * ...
     , Place
     , Rgn(..)
@@ -68,6 +70,14 @@ type family Dress sig where
     Dress ('S.Const a) = 'Const a
     Dress (a 'S.:-> b) = Dress a ':-> Dress b
     Dress (p 'S.:=> a) = p ':=> Dress a
+
+-- | ...
+type Plain :: forall r . Label r * -> Label r *
+type family Plain l where
+    Plain ('Const a) = 'Const a
+    Plain (a ':-> b) = Plain a ':-> Plain b
+    Plain (p ':=> a) = p ':=> Plain a
+    Plain (a ':^ _)  = Plain a
 
 -- | Witness of equality between a symbol's signature and its erased annotation.
 newtype lbl :~~: sig = Stripped (Strip lbl :~: sig)
@@ -139,10 +149,25 @@ testLabel (LblAt r1 a1) (LblAt r2 a2)
     = Just Refl
 testLabel _ _ = Nothing
 
+--------------------------------------------------------------------------------
+
 witSDIso :: SigRep sig -> Strip (Dress sig) :~: sig
 witSDIso (SigConst) = Refl
 witSDIso (SigPart a b) | Refl <- witSDIso a, Refl <- witSDIso b = Refl
 witSDIso (SigPred _ a) | Refl <- witSDIso a = Refl
+
+witSPlain :: LblRep a -> SigRep b -> Strip a :~: b -> Plain a :~: Dress b
+witSPlain (LblConst) _ Refl = Refl
+witSPlain (LblPart a b) (SigPart c d) Refl
+    | Refl <- witSPlain a c Refl
+    , Refl <- witSPlain b d Refl
+    = Refl
+witSPlain (LblPred _ a) (SigPred _ b) Refl
+    | Refl <- witSPlain a b Refl
+    = Refl
+witSPlain (LblAt _ a) b Refl
+    | Refl <- witSPlain a b Refl
+    = Refl
 
 -- note: 'Erasure' being a type family seems to prevent a 'HasDict' instance.
 -- (|~) :: Maybe (a :~~: b) -> (a ~ Erasure b => Maybe c) -> Maybe c

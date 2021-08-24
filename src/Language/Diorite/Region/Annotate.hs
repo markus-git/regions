@@ -59,14 +59,22 @@ type Store sym = M.IntMap (Hidden sym)
 
 --------------------------------------------------------------------------------
 
-type ExLBeta :: forall r . (Symbol (Put r) *) -> (Qualifier (Put r) -> Constraint) -> (Signature (Put r) *) -> *
+type ExLBeta :: forall r
+    .  (Symbol (Put r) *)
+    -> (Qualifier (Put r) -> Constraint)
+    -> (Signature (Put r) *)
+    -> *
 data ExLBeta sym p sig where
     ExLBeta :: (p qs)
         => Beta sym qs sig
         -> QualRep qs
         -> ExLBeta sym p sig
 
-type ExLEta :: forall r . (Symbol (Put r) *) -> (Qualifier (Put r) -> Constraint) -> (Signature (Put r) *) -> *
+type ExLEta :: forall r
+    .  (Symbol (Put r) *)
+    -> (Qualifier (Put r) -> Constraint)
+    -> (Signature (Put r) *)
+    -> *
 data ExLEta sym p sig where
     ExLEta :: (p qs)
         => Eta sym qs sig
