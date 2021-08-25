@@ -12,10 +12,10 @@ module Language.Diorite.Region.Labels
     -- ** ...
     , LblRep(..)
     , Lbl(..)
-    , strip
+  --, strip
     , dress
     -- ** ...
-    , testLabel
+  --, testLabel
     , witSDIso
     , witSPlain
     -- * ...
@@ -90,8 +90,9 @@ type LblRep :: forall r . Label r * -> *
 data LblRep lbl where
     LblConst :: Typeable a => LblRep ('Const a)
     LblPart  :: LblRep a -> LblRep lbl -> LblRep (a ':-> lbl)
-    LblPred  :: Typeable p => Proxy p -> LblRep lbl -> LblRep (p ':=> lbl)
-    LblAt    :: Typeable r => Proxy r -> LblRep lbl -> LblRep (lbl ':^ r)
+    LblPred  :: Proxy p -> LblRep lbl -> LblRep (p ':=> lbl)
+    LblAt    :: Proxy r -> LblRep lbl -> LblRep (lbl ':^ r)
+-- todo: remove 'Typeable' for now, think I might have to do without them.
 
 -- | ...
 type  Lbl :: forall r . Label r * -> Constraint
@@ -104,20 +105,20 @@ instance Typeable a => Lbl ('Const a) where
 instance (Lbl a, Lbl lbl) => Lbl (a ':-> lbl) where
     label = LblPart label label
 
-instance (Typeable ('Put r), Lbl lbl) => Lbl ('Put r ':=> lbl) where
+instance (Lbl lbl) => Lbl ('Put r ':=> lbl) where
     label = LblPred Proxy label
 
-instance (Typeable r, Lbl lbl) => Lbl (lbl ':^ r) where
+instance (Lbl lbl) => Lbl (lbl ':^ r) where
     label = LblAt Proxy label
 
 --------------------------------------------------------------------------------
 -- ** Implementation of ...
 
-strip :: forall r (lbl :: Label r *) . Typeable r => LblRep lbl -> SigRep (Strip lbl)
-strip (LblConst)    = SigConst
-strip (LblPart a b) = SigPart (strip a) (strip b)
-strip (LblPred p a) = SigPred p (strip a)
-strip (LblAt _ a)   = strip a
+-- strip :: forall r (lbl :: Label r *) . Typeable r => LblRep lbl -> SigRep (Strip lbl)
+-- strip (LblConst)    = SigConst
+-- strip (LblPart a b) = SigPart (strip a) (strip b)
+-- strip (LblPred p a) = SigPred p (strip a)
+-- strip (LblAt _ a)   = strip a
 
 dress :: forall r (sig :: Signature (Put r) *) . SigRep sig -> LblRep (Dress sig)
 dress (SigConst)      = LblConst
@@ -127,27 +128,26 @@ dress (SigPred p sig) = LblPred p (dress sig)
 --------------------------------------------------------------------------------
 -- ** ...
 
--- | ...
-testLabel :: LblRep a -> LblRep b -> Maybe (a :~: b)
-testLabel a@(LblConst) b@(LblConst)
-    | Just Refl <- testConst a b
-    = Just Refl
-  where
-    testConst :: LblRep ('Const a) -> LblRep ('Const b) -> Maybe (a :~: b)
-    testConst LblConst LblConst = eqT
-testLabel (LblPart a1 b1) (LblPart a2 b2)
-    | Just Refl <- testLabel a1 a2
-    , Just Refl <- testLabel b1 b2
-    = Just Refl
-testLabel (LblPred p1 a1) (LblPred p2 a2)
-    | Just Refl <- eqP p1 p2
-    , Just Refl <- testLabel a1 a2
-    = Just Refl
-testLabel (LblAt r1 a1) (LblAt r2 a2)
-    | Just Refl <- eqP r1 r2
-    , Just Refl <- testLabel a1 a2
-    = Just Refl
-testLabel _ _ = Nothing
+-- testLabel :: LblRep a -> LblRep b -> Maybe (a :~: b)
+-- testLabel a@(LblConst) b@(LblConst)
+--     | Just Refl <- testConst a b
+--     = Just Refl
+--   where
+--     testConst :: LblRep ('Const a) -> LblRep ('Const b) -> Maybe (a :~: b)
+--     testConst LblConst LblConst = eqT
+-- testLabel (LblPart a1 b1) (LblPart a2 b2)
+--     | Just Refl <- testLabel a1 a2
+--     , Just Refl <- testLabel b1 b2
+--     = Just Refl
+-- testLabel (LblPred p1 a1) (LblPred p2 a2)
+--     | Just Refl <- eqP p1 p2
+--     , Just Refl <- testLabel a1 a2
+--     = Just Refl
+-- testLabel (LblAt r1 a1) (LblAt r2 a2)
+--     | Just Refl <- eqP r1 r2
+--     , Just Refl <- testLabel a1 a2
+--     = Just Refl
+-- testLabel _ _ = Nothing
 
 --------------------------------------------------------------------------------
 
@@ -168,11 +168,6 @@ witSPlain (LblPred _ a) (SigPred _ b) Refl
 witSPlain (LblAt _ a) b Refl
     | Refl <- witSPlain a b Refl
     = Refl
-
--- note: 'Erasure' being a type family seems to prevent a 'HasDict' instance.
--- (|~) :: Maybe (a :~~: b) -> (a ~ Erasure b => Maybe c) -> Maybe c
--- (|~) m a = do (Erased Refl) <- m;  a
--- infixr |~
 
 --------------------------------------------------------------------------------
 -- * ...

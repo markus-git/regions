@@ -17,7 +17,7 @@ import qualified Language.Diorite.Qualifiers.Witness as W
 import qualified Language.Diorite.Traversal as T
 import qualified Language.Diorite.Region.Labels as L
 
-import Data.Constraint (Dict(..))
+import Data.Constraint (Dict(..), Constraint)
 import Data.Type.Equality ((:~:)(..))
 import Data.Typeable (Typeable)
 import Data.Proxy (Proxy(..))
@@ -29,25 +29,35 @@ import Data.Proxy (Proxy(..))
 type ABeta :: forall r . Label r * -> *
 data ABeta l where
     ASym   :: SigRep sig -> ABeta (Dress sig)
+    --     :: sig -> Dress sig
     AApp   :: L.Plain b ~ a => ABeta (a 'L.:-> sig) -> AEta b -> ABeta sig
+    --     :: (a :-> sig) -> (a ^ r) -> sig
     AEApp  :: ABeta (p 'L.:=> sig) -> Ev p -> ABeta sig
+    --     :: (p :=> sig) -> p -> sig
+    AAt    :: ABeta sig -> Proxy r -> ABeta (sig 'L.:^ r)
 
 type AEta :: forall r . Label r * -> *
 data AEta l where
-    ASpine :: LblRep ('L.Const a) -> AEta ('L.Const a)
+    ASpine :: LblRep ('L.Const a 'L.:^ p) -> AEta ('L.Const a 'L.:^ p)
+    --     :: ('Const a ^ r) -> ('Const a ^ r)
     ALam   :: AEta sig -> AEta (a 'L.:-> sig)
+    --     :: a? -> sig -> ((a :-> sig) ^ r)
     AELam  :: Ev p -> AEta sig -> AEta (p 'L.:=> sig)
+    --     :: p -> sig -> ((p :=> sig) ^ r)
 -- todo: actually lable things.
 
-data EBeta sym sig p q where
-    EBeta :: (p qs, q l) => Beta sym qs sig -> ABeta l
-        -> QualRep qs
-        -> EBeta sym sig p q
+type LEta :: forall r . (Label r * -> Constraint) -> *
+data LEta p where
+    LEta :: p l => AEta l -> LblRep l -> LEta p
 
-data EEta sym sig p q where
-    EEta :: (p qs, q l) => Eta sym qs sig -> AEta l
-        -> QualRep qs -> LblRep l -> SigRep sig
-        -> EEta sym sig p q
+-- EBeta :: (p qs, q l) => Beta qs sig -> ABeta l -> QR qs -> EBeta sig p q
+-- EEta  :: (p qs, q l) => Eta sym qs sig -> AEta l -> QR qs -> LR l -> SR sig -> EEta sym sig p q
+
+data EBeta sym q sig where
+    EBeta :: q qs => Beta sym qs sig -> QualRep qs -> EBeta sym q sig
+
+data EEta sym q sig where
+    EEta :: q qs => Eta sym qs sig -> QualRep qs -> EEta sym q sig
 
 class    (Extends ps qs ~ True) => (>=) ps qs
 instance (Extends ps qs ~ True) => (>=) ps qs
@@ -69,93 +79,101 @@ annotateBeta :: forall r (sym :: Symbol (Put r) *) qs ps eps rs sig l a
     => Beta sym eps sig
     -> Args sym rs sig
     -> ABeta @r l
+    -> SigRep sig
     -> QualRep ps
     -> QualRep eps
-    -> ( EBeta sym ('S.Const @(Put r) a) ((>=) qs) ((~=) ('S.Const @(Put r) a))
+    -> ( EBeta sym ((>=) qs) ('S.Const @(Put r) a)
+       , ABeta ('L.Const @r a)
        , QualRep qs
        )
-annotateBeta b Nil l ps eps =
-    (EBeta b l eps, ps)
-annotateBeta b ((e :: Eta sym xs x) :* (as :: Args sym ys y)) l ps eps
+annotateBeta b Nil l (S.SigConst) ps eps =
+    (EBeta b eps, l, ps)
+annotateBeta b ((e :: Eta sym xs x) :* (as :: Args sym ys y)) l (S.SigPart a sig) ps eps
     | Refl :: Strip l :~: (x 'S.:-> y)             <- Refl
     , Refl :: l       :~: (Dress x 'L.:-> Dress y) <- Refl
     --
-    = case annotateEta e of
-        (EEta (e' :: Eta sym exs x) (l' :: AEta lx) exs lr xr, xs)
+    = case annotateEta e a of
+        (EEta (e' :: Eta sym exs x) exs, LEta (l' :: AEta lx) lr, xs)
           | Refl :: Strip lx :~: x <- Refl
-          --
           -> W.witEUBoth ps eps xs exs Refl Refl |-
-             L.witSPlain lr xr Refl |-
+             L.witSPlain lr a Refl |-
              --
              let b'   = b :$ e' in
              let ps'  = Q.union ps xs in
              let eps' = Q.union eps exs in
              let l''  = AApp l l' in
              --
-             annotateBeta b' as l'' ps' eps'
-annotateBeta b ((p@(Ev _) :: Ev p) :~ (as :: Args sym ys y)) l ps eps
+             annotateBeta b' as l'' sig ps' eps'
+annotateBeta b ((p@(Ev _) :: Ev p) :~ (as :: Args sym ys y)) l (S.SigPred pp sig) ps eps
     = let b'   = b :# p in
-      let ps'  = Q.QualPred (Proxy :: Proxy p) ps in
-      let eps' = Q.QualPred (Proxy :: Proxy p) eps in
+      let ps'  = Q.QualPred pp ps in
+      let eps' = Q.QualPred pp eps in
       let l'   = AEApp l p in
       --
-      annotateBeta b' as l' ps' eps'
+      annotateBeta b' as l' sig ps' eps'
 
 annotateEta :: forall r (sym :: Symbol (Put r) *) qs sig
     .  ( Sym sym
        )
     => Eta sym qs sig
-    -> ( EEta sym sig ((>=) qs) ((~=) sig)
+    -> SigRep sig
+    -> ( EEta sym ((>=) qs) sig
+       , LEta @r ((~=) sig)
        , QualRep qs
        )
-annotateEta (Spine b)
+annotateEta (Spine b) (S.SigConst)
     = case annotateASTF b of
-        (EBeta (b' :: Beta sym eqs ('S.Const a)) l eqs, qs)
-          | Dict :: Dict (Typeable a) <- undefined
+        (EBeta (b' :: Beta sym eqs ('S.Const a)) eqs, AAt _ pp :: ABeta ('L.Const @r a 'L.:^ p), qs)
           --
           -> let e  = Spine b' in
-             let lr = L.LblConst :: LblRep ('L.Const a) in
              let sr = S.SigConst :: SigRep ('S.Const a) in
+             let lr = L.LblAt pp L.LblConst :: LblRep ('L.Const a 'L.:^ p) in
              let l' = ASpine lr in
              --
-             (EEta e l' eqs lr sr, qs)
-annotateEta (n :\ e)
+             (EEta e eqs, LEta l' lr, qs)
+-- todo: as I discard the annotation on 'b' here I need to make sure it's
+--       already "stored" in 'b' somehow (as a decoration prob.).
+-- todo: if I add 'Typeable' to regions in 'LblPred' I would need to prove
+--       'Typeable p' here, which in turn means I would have to create fresh,
+--       constrained type-variables (not sure if that's possible).
+annotateEta (n :\ e) (S.SigPart b sig)
     | Refl :: sig :~: (b 'S.:-> a) <- Refl
     --
-    = case annotateEta e of
-        (EEta (e' :: Eta sym eqs a) (l :: AEta l) eqs lr sr, qs)
+    = case annotateEta e sig of
+        (EEta (e' :: Eta sym eqs a) eqs, LEta (l :: AEta l) lr, qs)
+          --
           -> let e'' = n :\ e' :: Eta sym eqs (b 'S.:-> a) in
              let l'  = ALam l  :: AEta (Dress b 'L.:-> l) in
-             let sig = S.signature :: SigRep b in
-             let sr' = S.SigPart sig sr in
-             let lr' = L.LblPart (L.dress sig) lr in
+             let lr' = L.LblPart (L.dress b) lr in
              --
-             L.witSDIso sig |-
+             L.witSDIso b |-
              --
-             (EEta e'' l' eqs lr' sr', qs)
-annotateEta (p@(Ev _ :: Ev p) :\\ e)
-    = case annotateEta e of
-        (EEta (e' :: Eta sym eqs a) (l :: AEta l) eqs lr sr, qs)
+             (EEta e'' eqs, LEta l' lr', qs)
+annotateEta (p@(Ev _ :: Ev p) :\\ e) (S.SigPred _ sig)
+    = case annotateEta e sig of
+        (EEta (e' :: Eta sym eqs a) eqs, LEta (l :: AEta l) lr, qs)
           | Refl <- W.witExtIn (Proxy :: Proxy p) qs eqs Refl Refl
           , Refl <- W.witExtShrink (Proxy :: Proxy p) qs eqs Refl
           --
           -> let e''  = p :\\ e' :: Eta sym (Q.Remove p eqs) (p 'S.:=> a) in
-             let qs'  = Q.remove (Proxy :: Proxy p) qs in
-             let eqs' = Q.remove (Proxy :: Proxy p) eqs in
+             let pp   = Proxy :: Proxy p in
+             let qs'  = Q.remove pp qs in
+             let eqs' = Q.remove pp eqs in
              let l'   = AELam p l in
-             let sr'  = S.SigPred (Proxy :: Proxy p) sr in
-             let lr'  = L.LblPred (Proxy :: Proxy p) lr in
+           --let sr'  = S.SigPred pp sr in
+             let lr'  = L.LblPred pp lr in
              --
-            (EEta e'' l' eqs' lr' sr', qs')
+            (EEta e'' eqs', LEta l' lr', qs')
 
 --------------------------------------------------------------------------------
 
 -- | ...
-annotateASTF :: forall r (sym :: Symbol (Put r) *) qs a
-    .  ( Sym sym 
+annotateASTF :: forall r (sym :: Symbol (Put r) *) (p :: r) qs a
+    .  ( Sym sym
        )
     => ASTF sym qs a
-    -> ( EBeta sym ('S.Const @(Put r) a) ((>=) qs) ((~=) ('S.Const @(Put r) a))
+    -> ( EBeta sym ((>=) qs) ('S.Const @(Put r) a)
+       , ABeta ('L.Const @r a 'L.:^ p)
        , QualRep qs
        )
 annotateASTF ast = T.constMatch matchSym matchVar ast
@@ -165,15 +183,19 @@ annotateASTF ast = T.constMatch matchSym matchVar ast
            , SmartApply 'Q.None rs ~ qs
            )
         => sym sig -> Args sym rs sig
-        -> ( EBeta sym ('S.Const @(Put r) a) ((>=) qs) ((~=) ('S.Const @(Put r) a))
+        -> ( EBeta sym ((>=) qs) ('S.Const @(Put r) a)
+           , ABeta ('L.Const @r a 'L.:^ p)
            , QualRep qs
            )
     matchSym sym as
-        = let sig = symbol sym in
+        = let sig  = symbol sym in
+          let none = Q.QualNone in
           --
           L.witSDIso sig |-
           --
-          annotateBeta (Sym sym) as (ASym sig) (Q.QualNone) (Q.QualNone)
+          let (b, l, qs) = annotateBeta (Sym sym) as (ASym sig) sig none none in
+          --
+          (b, annotate l, qs)
 
     matchVar :: forall ps rs sig
         .  ( Result sig ~ 'S.Const a
@@ -181,10 +203,14 @@ annotateASTF ast = T.constMatch matchSym matchVar ast
            , Sig sig
            )
         => Name -> QualRep ps -> Args sym rs sig
-        -> ( EBeta sym ('S.Const @(Put r) a) ((>=) qs) ((~=) ('S.Const @(Put r) a))
+        -> ( EBeta sym ((>=) qs) ('S.Const @(Put r) a)
+           , ABeta ('L.Const @r a 'L.:^ p)
            , QualRep qs
            )
     matchVar = undefined
+
+    annotate :: ABeta ('L.Const @r a) -> ABeta ('L.Const @r a 'L.:^ p)
+    annotate l = AAt l Proxy
 
 --------------------------------------------------------------------------------
 -- Fin.
