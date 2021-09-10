@@ -84,8 +84,8 @@ instance (Typeable p, Sig sig) => Sig (p ':=> sig) where
 --------------------------------------------------------------------------------
 -- ** ...
 
-result :: SigRep sig -> Proxy (Result sig)
-result (SigConst)    = Proxy
+result :: SigRep sig -> SigRep (Result sig)
+result (SigConst)    = SigConst
 result (SigPart _ b) = result b
 result (SigPred _ a) = result a
 

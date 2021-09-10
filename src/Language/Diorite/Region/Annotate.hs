@@ -159,7 +159,11 @@ annotateEta (Spine (b :: Beta sym ps ('S.Const a))) s
       , ps :: QualRep qs)
         <- annotateAST b s
     --
-    = let e' = Spine b' :: Eta (sym :&: LBeta) xs ('S.Const a) in
+    = --let p   = undefined :: Place p in
+      --let Refl = undefined :: Remove ('Put p) qs :~: qs in
+      --let b'' = atBeta b' (undefined) :: Beta (sym :&: LBeta) ('Put p ':. xs) ('S.Const a) in
+      --
+      let e' = Spine b' :: Eta (sym :&: LBeta) xs ('S.Const a) in
       let l' = LSpine   :: LEta @r ('S.Const a) in
       --
       (ExLEta e' eps, l', ps)

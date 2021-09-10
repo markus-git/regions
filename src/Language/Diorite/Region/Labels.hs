@@ -1,5 +1,9 @@
 {-# OPTIONS_GHC -Wall #-}
 
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE EmptyCase #-}
+
 module Language.Diorite.Region.Labels
     (
     -- * ...
@@ -28,13 +32,12 @@ module Language.Diorite.Region.Labels
     ) where
 
 import Language.Diorite.Signatures (Signature, SigRep(..))
-import qualified Language.Diorite.Signatures as S (Signature(..))
 import Language.Diorite.Qualifiers (Qualifier(..), Remove)
 import Language.Diorite.Syntax
+import qualified Language.Diorite.Signatures as S (Signature(..))
 
 import Data.Constraint (Constraint)
-import Data.Type.Equality ((:~:)(..))
-import Data.Typeable (Typeable, eqT)
+import Data.Typeable (Typeable)
 import Data.Proxy (Proxy(..))
 
 --------------------------------------------------------------------------------
@@ -185,10 +188,10 @@ data Rgn sig where
 -- todo: 'Put r' kind here really limits the choice of qualifiers.
 
 --------------------------------------------------------------------------------
--- * ...
+-- ** ...
 
--- | Introduce a local binding for place associated with region 'r'.
-local :: forall r (sym :: Symbol (Put r) *) qs p a
+-- | Introduce a local binding for place 'p', associated with region 'r'.
+local :: forall r (sym :: Symbol (Put r) *) qs (p :: r) a
     . (Rgn :<: sym, Typeable p, Typeable r)
     => ASTF sym ('Put p ':. qs) a
     -> Place p
@@ -198,49 +201,21 @@ local ast p = (inj Local :: AST sym 'None (('Put p 'S.:=> 'S.Const a) 'S.:-> 'S.
 --       a first-order type it should be fine to limit 'local' to 'ASTF' values.
 
 -- | Annotate a value-expression with the place to store its result in.
-atBeta :: forall r sym qs a . (Rgn :<: sym, Remove ('Put r) qs ~ qs)
+atBeta :: forall r (sym :: Symbol (Put r) *) qs (p :: r) a
+    .  (Rgn :<: sym, Remove ('Put p) qs ~ qs)
     => ASTF sym qs a
-    -> Place r
-    -> ASTF sym ('Put r ':. qs) a
-atBeta ast p = (inj At :: AST sym 'None ('Put r 'S.:=> 'S.Const a 'S.:-> 'S.Const a)) :# p :$ (Spine ast)
+    -> Place p
+    -> ASTF sym ('Put p ':. qs) a
+atBeta ast p = (inj At :: AST sym 'None ('Put p 'S.:=> 'S.Const a 'S.:-> 'S.Const a)) :# p :$ Spine ast
 -- note: 'Spine' is for values, hence sep. 'Beta'/'Eta' variants of 'at'.
 
 -- | Annotate a function with the place to store its closure in.
-atEta :: forall r sym qs sig . (Rgn :<: sym, Remove ('Put r) qs ~ qs)
+atEta :: forall r (sym :: Symbol (Put r) *) qs (p :: r) sig
+    .  (Rgn :<: sym, Remove ('Put p) qs ~ qs)
     => Eta sym qs sig
-    -> Place r
-    -> AST sym ('Put r ':. qs) sig
-atEta ast p = (inj At :: AST sym 'None ('Put r 'S.:=> sig 'S.:-> sig)) :# p :$ ast
+    -> Place p
+    -> AST sym ('Put p ':. qs) sig
+atEta ast p = (inj At :: AST sym 'None ('Put p 'S.:=> sig 'S.:-> sig)) :# p :$ ast
 
---------------------------------------------------------------------------------
--- newtype LBeta sym qs sig l = LBeta (Beta sym qs sig, LblRep l, l :~~: sig)
--- newtype LEta  sym qs sig l = LEta  (Eta  sym qs sig, LblRep l, l :~~: sig)
-
--- localL :: forall r (sym :: Symbol (Put r) *) qs p a l
---     .  (Rgn :<: sym, Typeable p, Typeable r)
---     => LBeta sym ('Put p ':. qs) ('S.Const a) l
---     -> Place p
---     -> LBeta sym qs ('S.Const a) l
--- localL (LBeta (ast, t, Stripped Refl)) p =
---     LBeta (local ast p, t, Stripped Refl)
-  
--- atBetaL :: forall sym r qs a l
---     .  (Rgn :<: sym, Remove ('Put r) qs ~ qs)
---     => LBeta sym qs ('S.Const a) l
---     -> Place r
---     -> LBeta sym ('Put r ':. qs) ('S.Const a) (l ':^ r)
--- atBetaL (LBeta (ast, t, Stripped Refl)) p =
---     LBeta (atBeta ast p, LblAt Proxy t, Stripped Refl)
-
--- atEtaL :: forall sym r qs sig l
---     .  (Rgn :<: sym, Remove ('Put r) qs ~ qs)
---     => LEta sym qs sig l
---     -> Place r
---     -> LBeta sym ('Put r ':. qs) sig (l ':^ r)
--- atEtaL (LEta (ast, t, Stripped Refl)) p =
---     LBeta (atEta ast p, LblAt Proxy t, Stripped Refl)
-
--- todo: not sure if 'atBetaL' and 'atEtaL' should have a 'Place r' argument or
---       produce an AST which expects a 'Place r'.
 --------------------------------------------------------------------------------
 -- Fin.

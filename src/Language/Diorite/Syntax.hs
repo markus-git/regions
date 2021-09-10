@@ -20,6 +20,10 @@ module Language.Diorite.Syntax
     , Sym(..)
     , lam
     , elam
+    , maxNameEta
+    , maxNameBeta
+    , maxEvEta
+    , maxEvBeta
     -- * "Smart" constructors.
     , Exists(..)
     , Ex(..)
@@ -103,16 +107,17 @@ class Sym sym where
 
 --------------------------------------------------------------------------------
 
--- | Get the highest variable name bound for 'Eta' node.
+-- | Get the highest variable name bound for an 'Eta'.
 maxNameEta :: Eta sym qs a -> Name
 maxNameEta (n :\ _)  = n
 maxNameEta (_ :\\ e) = maxNameEta e
 maxNameEta (Spine b) = maxNameBeta b
-  where
-    maxNameBeta :: Beta sym qs a -> Name
-    maxNameBeta (beta :$ eta) = maxNameBeta beta `Prelude.max` maxNameEta eta
-    maxNameBeta (beta :# _)   = maxNameBeta beta
-    maxNameBeta _             = 0
+
+-- | Get the highest variable name bound for a 'Beta'.
+maxNameBeta :: Beta sym qs a -> Name
+maxNameBeta (beta :$ eta) = maxNameBeta beta `Prelude.max` maxNameEta eta
+maxNameBeta (beta :# _)   = maxNameBeta beta
+maxNameBeta _             = 0
 
 -- | Interface for variable binding.
 lam :: Sig a => (Beta sym 'None a -> Eta sym qs b) -> Eta sym qs (a ':-> b)
@@ -123,16 +128,17 @@ lam f = v :\ body
 
 --------------------------------------------------------------------------------
 
--- | Get the highest evidence name bound for 'Eta' node.
+-- | Get the highest evidence name bound for an 'Eta'.
 maxEvEta :: Eta sym qs a -> Name
 maxEvEta (_ :\ e)     = maxEvEta e
 maxEvEta (Ev n :\\ _) = n
 maxEvEta (Spine b)    = maxEvBeta b
-  where
-    maxEvBeta :: Beta sym qs a -> Name
-    maxEvBeta (beta :$ eta) = maxEvBeta beta `Prelude.max` maxEvEta eta
-    maxEvBeta (beta :# _)   = maxEvBeta beta
-    maxEvBeta _             = 0
+
+-- | Get the highest evidence name bound for a 'Beta'.
+maxEvBeta :: Beta sym qs a -> Name
+maxEvBeta (beta :$ eta)  = maxEvBeta beta `Prelude.max` maxEvEta eta
+maxEvBeta (beta :# Ev n) = maxEvBeta beta `Prelude.max` n
+maxEvBeta _              = 0
 
 -- | Interface for evidence binding.
 elam :: Typeable q => (Ev q -> Eta sym (q ':. qs) b) -> Eta sym qs (q ':=> b)
