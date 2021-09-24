@@ -90,11 +90,11 @@ absurd x = case x of {}
 
 witEqSym :: forall a b . (T a, T b) => P a -> P b -> (a == b) :~: (b == a)
 witEqSym a b =
-  case testEq a b of
-      Left  Refl -> Refl
-      Right Refl -> case testEq b a of
-          Left  x    -> case x of {}
-          Right Refl -> Refl
+    case testEq a b of
+        Left  Refl -> Refl
+        Right Refl -> case testEq b a of
+            Left  x    -> case x of {}
+            Right Refl -> Refl
 {-# NOINLINE witEqSym #-}
 {-# RULES "witEqSym" forall a b . witEqSym a b = Unsafe.unsafeCoerce Refl #-}
 

@@ -29,16 +29,34 @@ module Language.Diorite.Region.Labels
     , local
     , atBeta
     , atEta
+    -- ** ...
+    , QualDict(..)
+    , Puts(..)
+    , putCong
+    , putUnique
+    , putDiff
+    , Greatest
+    , thmGreatestSucc
+    , thmGreatestPut
+    , thmGreatestUnique
     ) where
 
 import Language.Diorite.Signatures (Signature, SigRep(..))
-import Language.Diorite.Qualifiers (Qualifier(..), Remove)
+import Language.Diorite.Qualifiers (Qualifier(..), type (:/~:), type (==), If, Remove, Elem, QualRep(..))
+import Language.Diorite.Qualifiers.Witness
 import Language.Diorite.Syntax
+import Language.Diorite.Region.Labels.Witness
 import qualified Language.Diorite.Signatures as S (Signature(..))
 
 import Data.Constraint (Constraint)
 import Data.Typeable (Typeable)
+import Data.Type.Equality (type (:~:)(..))
 import Data.Proxy (Proxy(..))
+import qualified Unsafe.Coerce as Unsafe (unsafeCoerce)
+
+import GHC.TypeNats
+
+import Prelude hiding (succ)
 
 --------------------------------------------------------------------------------
 -- * ...
@@ -88,7 +106,7 @@ infixr :~~:
 
 --------------------------------------------------------------------------------
 -- ** Rep of ...
-
+  
 type LblRep :: forall r . Label r * -> *
 data LblRep lbl where
     LblConst :: Typeable a => LblRep ('Const a)
@@ -193,9 +211,7 @@ data Rgn sig where
 -- | Introduce a local binding for place 'p', associated with region 'r'.
 local :: forall r (sym :: Symbol (Put r) *) qs (p :: r) a
     . (Rgn :<: sym, Typeable p, Typeable r)
-    => ASTF sym ('Put p ':. qs) a
-    -> Place p
-    -> ASTF sym qs a
+    => ASTF sym ('Put p ':. qs) a -> Place p -> ASTF sym qs a
 local ast p = (inj Local :: AST sym 'None (('Put p 'S.:=> 'S.Const a) 'S.:-> 'S.Const a)) :$ (p :\\ Spine ast)
 -- note: Since our region inference rules only introduce bindings at terms with
 --       a first-order type it should be fine to limit 'local' to 'ASTF' values.
@@ -203,19 +219,86 @@ local ast p = (inj Local :: AST sym 'None (('Put p 'S.:=> 'S.Const a) 'S.:-> 'S.
 -- | Annotate a value-expression with the place to store its result in.
 atBeta :: forall r (sym :: Symbol (Put r) *) qs (p :: r) a
     .  (Rgn :<: sym, Remove ('Put p) qs ~ qs)
-    => ASTF sym qs a
-    -> Place p
-    -> ASTF sym ('Put p ':. qs) a
+    => ASTF sym qs a -> Place p -> ASTF sym ('Put p ':. qs) a
 atBeta ast p = (inj At :: AST sym 'None ('Put p 'S.:=> 'S.Const a 'S.:-> 'S.Const a)) :# p :$ Spine ast
 -- note: 'Spine' is for values, hence sep. 'Beta'/'Eta' variants of 'at'.
 
 -- | Annotate a function with the place to store its closure in.
 atEta :: forall r (sym :: Symbol (Put r) *) qs (p :: r) sig
     .  (Rgn :<: sym, Remove ('Put p) qs ~ qs)
-    => Eta sym qs sig
-    -> Place p
-    -> AST sym ('Put p ':. qs) sig
+    => Eta sym qs sig -> Place p -> AST sym ('Put p ':. qs) sig
 atEta ast p = (inj At :: AST sym 'None ('Put p 'S.:=> sig 'S.:-> sig)) :# p :$ ast
+
+--------------------------------------------------------------------------------
+-- ** ...
+
+type QualDict :: Qualifier (Put Nat) -> *
+data QualDict qs where
+  DictNone :: QualDict ('None)
+  DictPred :: NatRep r -> QualDict qs -> QualDict ('Put r ':. qs)
+
+type Puts :: Qualifier (Put Nat) -> Constraint
+class Puts qs where
+    puts :: QualDict qs
+
+instance Puts ('None) where
+    puts = DictNone
+
+instance (KnownNat r, Puts qs) => Puts ('Put r ':. qs) where
+    puts = DictPred (Nat (natVal (Proxy @r))) puts
+
+--------------------------------------------------------------------------------
+
+putCong :: forall a b . a :~: b -> 'Put a :~: 'Put b
+putCong Refl = Refl
+
+putUnique :: forall a b . 'Put a :~: 'Put b -> a :~: b
+putUnique Refl = Refl
+
+putDiff :: forall a b . N a -> N b -> a :/~: b -> 'Put a :/~: 'Put b
+putDiff _ _ Refl = Unsafe.unsafeCoerce (Refl @('False))
+
+--------------------------------------------------------------------------------
+-- ** ...
+
+type Greatest :: Nat -> Qualifier (Put Nat) -> Bool
+type family Greatest r qs where
+    Greatest _ ('None) = 'True
+    Greatest r ('Put q ':. qs) = If (CmpNat r q == 'GT) (Greatest r qs) 'False
+
+type D = QualDict
+
+thmGreatestSucc :: forall a b
+    .  N a -> Q b -> D b
+    -> Greatest a b :~: 'True
+    -> Greatest (Succ a) b :~: 'True
+thmGreatestSucc _ (QualNone) _ _ = Refl
+thmGreatestSucc a (QualPred _ bs) (DictPred r ds) Refl =
+    case compareNat a r of
+        Gt | Refl <- witSuccGT @a
+           , Refl <- witCmpTrans (succ a) a r Gt Refl Refl
+           , Refl <- thmGreatestSucc a bs ds Refl
+           -> Refl
+
+thmGreatestPut :: forall a b c
+    .  N a -> N b -> Q c
+    -> CmpNat a b :~: 'GT
+    -> Greatest a c :~: 'True
+    -> Greatest a ('Put b ':. c) :~: 'True
+thmGreatestPut _ _ (QualNone) Refl _ = Refl
+thmGreatestPut _ _ (QualPred _ _) Refl Refl = Refl
+
+thmGreatestUnique :: forall a b
+  .  N a -> Q b -> D b
+  -> Greatest a b :~: 'True
+  -> Elem ('Put a) b :~: 'False
+thmGreatestUnique _ (QualNone) _ _ = Refl
+thmGreatestUnique a (QualPred _ bs) (DictPred r ds) Refl =
+    case compareNat a r of
+        Gt | Refl <- witCmpNEQ a r Refl
+           , Refl <- putDiff a r Refl
+           , Refl <- thmGreatestUnique a bs ds Refl
+           -> Refl
 
 --------------------------------------------------------------------------------
 -- Fin.

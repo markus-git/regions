@@ -2,6 +2,7 @@
 {-# OPTIONS_GHC -fplugin GHC.TypeLits.Presburger #-}
 
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE EmptyCase #-}
 
 module Language.Diorite.Region.Labels.Witness where
 
@@ -19,10 +20,29 @@ import GHC.TypeNats
 import Prelude hiding (pred)
 
 --------------------------------------------------------------------------------
+-- Presburger seems to only work with the '==' type from 'Data.Type.Equality',
+-- which I can't seem to use with Qualifiers. While I could say something like
+--   (:/~:) === (a T.== b ~ 'False, a T.=== b ~ 'False, a Q.== b ~ 'False),
+-- I feel like this approach is easier than rewriting Q & Q.Witness... but maybe
+-- its better to simply use 'T.==' in the long run.
+--
+-- The difference between the two is the extra application rule for 'T.==',
+-- which neither witnesses from Q nor here relies on ('Succ a' = 'a + 1', which
+-- is handled by the Presburger plugin).
+--
+-- todo: Try again with 'Data.Type.Equality.=='?
+
+presburger :: forall a b c . Proxy a -> Proxy b
+    -> (a == b) :~: c -> (a T.== b) :~: c
+presburger _ _ Refl = Unsafe.unsafeCoerce (Refl @c)
+
+equality :: forall a b c . Proxy a -> Proxy b
+    -> (a T.== b) :~: c -> (a == b) :~: c
+equality _ _ Refl = Unsafe.unsafeCoerce (Refl @c)
+  
+--------------------------------------------------------------------------------
 -- * ...
 --------------------------------------------------------------------------------
---------------------------------------------------------------------------------
--- ** ...
 
 -- | Representation of type-level naturals.
 type NatRep :: Nat -> *
@@ -31,17 +51,10 @@ newtype NatRep a = Nat Natural
 type N = NatRep
 
 testNat :: forall (a :: Nat) (b :: Nat)
-    .  N a -> N b -> Either (a :~: b) (a :/~: b)
+    . N a -> N b -> Either (a :~: b) (a :/~: b)
 testNat (Nat a) (Nat b) = case a == b of
-    True  -> Left  (Unsafe.unsafeCoerce Refl)
+    True  -> Left (Unsafe.unsafeCoerce Refl)
     False -> Right (Unsafe.unsafeCoerce Refl)
-
--- Presburger seems to only work with the built in '==' type, which I can't
--- seem to use with Qualifiers (todo: try again?). While I could say that
---   :/~: := (a T.== b ~ False, a Q.== b ~ False),
--- I feel like this approach is easier than rewriting Q & Q.Witness...
-false :: forall a b . Proxy a -> Proxy b -> a :/~: b -> (a T.== b) :~: 'False
-false _ _ (Refl :: a == b :~: 'False) = Unsafe.unsafeCoerce (Refl @'False)
 
 type Succ n = n + 1
 
@@ -90,19 +103,23 @@ witMinusCong Refl Refl = Refl
 
 --------------------------------------------------------------------------------
 
-witPlusMinus :: N a -> N b -> (a + b) - b :~: a
-witPlusMinus _ _ = Refl
+witPlusEq :: a + b :~: a + c -> b :~: c
+witPlusEq Refl = Refl
 
-witPlusMinus' :: N a -> N b -> (a + b) - a :~: b
-witPlusMinus' a b | Refl <- witPlusComm a = witPlusMinus b a
+witPlusEq' :: forall a b c . N a -> N c -> a + b :~: c + b -> a :~: c
+witPlusEq' a c Refl | Refl <- witPlusComm a, Refl <- witPlusComm c = witPlusEq @b @a @ c Refl
+
+witPlusMinus :: (a + b) - b :~: a
+witPlusMinus = Refl
+
+witPlusMinus' :: forall a b . N a -> (a + b) - a :~: b
+witPlusMinus' a | Refl <- witPlusComm a = witPlusMinus @b @a
 
 witPlusEqZero :: N a -> a + b :~: 0 -> a :~: 0
 witPlusEqZero _ Refl = Refl
 
---------------------------------------------------------------------------------
-
 witSuccCong :: a :~: b -> Succ a :~: Succ b
-witSuccCong Refl = witPlusCong Refl (Refl :: 1 :~: 1)
+witSuccCong eq = witPlusCong eq (Refl @1)
 
 witSuccInj :: Succ a :~: Succ b -> a :~: b
 witSuccInj Refl = Refl
@@ -111,7 +128,7 @@ witSuccPlus :: N a -> a + Succ b :~: Succ (a + b)
 witSuccPlus _ = Refl
 
 witPredCong :: a :~: b -> Pred a :~: Pred b
-witPredCong Refl = witMinusCong Refl (Refl :: 1 :~: 1)
+witPredCong eq = witMinusCong eq (Refl @1)
 
 witPredInj :: Pred a :~: Pred b -> a :~: b
 witPredInj Refl = Refl
@@ -120,7 +137,10 @@ witPredSucc :: Pred (Succ a) :~: a
 witPredSucc = Refl
 
 witSuccPred :: forall a . a :/~: 0 -> Succ (Pred a) :~: a
-witSuccPred neq | Refl <- false (Proxy @a) (Proxy @0) neq = Refl
+witSuccPred neq | Refl <- pres = Refl
+  where
+    pres :: (a T.== 0) :~: 'False
+    pres = presburger (Proxy @a) (Proxy @0) neq
 
 witPredUnique :: Succ a :~: b -> a :~: Pred b
 witPredUnique Refl = Refl
@@ -128,13 +148,13 @@ witPredUnique Refl = Refl
 --------------------------------------------------------------------------------
 -- ** ...
 
-type ZoS :: Nat -> *
-data ZoS a where
-    Zero :: ZoS 0
-    Succ :: NatRep a -> ZoS (Succ a)
+type SuccRep :: Nat -> *
+data SuccRep a where
+    Zero :: SuccRep 0
+    Succ :: NatRep a -> SuccRep (Succ a)
 
-testZoS :: forall a . N a -> ZoS a
-testZoS a = case testNat a (Nat 0 :: N 0) of
+testSucc :: forall a . N a -> SuccRep a
+testSucc a = case testNat a (Nat 0 :: N 0) of
     Left  Refl -> Zero
     Right Refl | Refl <- witSuccPred @a Refl -> Succ (pred a)
 
@@ -148,7 +168,7 @@ withInduction :: forall p k
 withInduction base step = go
   where
     go :: N m -> p m
-    go sn = case testZoS sn of
+    go sn = case testSucc sn of
       Zero   -> base
       Succ n -> withKnownNat n $ step n (go n)
 
@@ -157,61 +177,62 @@ withInduction base step = go
 
 type OrdRep :: Ordering -> *
 data OrdRep ord where
-    LtR :: OrdRep ('LT)
-    EqR :: OrdRep ('EQ)
-    GtR :: OrdRep ('GT)
+    Lt :: OrdRep ('LT)
+    Eq :: OrdRep ('EQ)
+    Gt :: OrdRep ('GT)
 
-compareNat :: NatRep a -> NatRep b -> OrdRep (CmpNat a b)
+compareNat :: N a -> N b -> OrdRep (CmpNat a b)
 compareNat (Nat a) (Nat b) = case compare a b of
-    LT -> Unsafe.unsafeCoerce LtR
-    EQ -> Unsafe.unsafeCoerce EqR
-    GT -> Unsafe.unsafeCoerce GtR
-
-witCmpEq :: NatRep a -> NatRep b -> CmpNat a b :~: 'EQ -> a :~: b
-witCmpEq _ _ Refl = Unsafe.unsafeCoerce Refl
+    LT -> Unsafe.unsafeCoerce Lt
+    EQ -> Unsafe.unsafeCoerce Eq
+    GT -> Unsafe.unsafeCoerce Gt
 
 --------------------------------------------------------------------------------
--- ** ...
 
-witSuccGt :: forall (a :: Nat) . NatRep a -> CmpNat (Succ a) a :~: 'GT
-witSuccGt _ = undefined
+witCmpCong :: a :~: b -> c :~: d -> CmpNat a c :~: CmpNat b d
+witCmpCong Refl Refl = Refl
 
---------------------------------------------------------------------------------
--- ** ...
+witCmpTrans :: N a -> N b -> N c -> OrdRep d
+    -> CmpNat a b :~: d -> CmpNat b c :~: d -> CmpNat a c :~: d
+witCmpTrans _ _ _ ord Refl Refl = case ord of
+    Gt -> Refl
+    Eq -> Refl
+    Lt -> Refl
 
--- type NatOf :: Put Nat -> Nat
--- type family NatOf n where
---     NatOf ('Put n) = n
+witCmpEQ :: N a -> N b -> CmpNat a b :~: 'EQ -> a :~: b
+witCmpEQ _ _ Refl = Refl
 
--- type Greatest :: Nat -> Qualifier (Put Nat) -> Bool
--- type family Greatest n qs where
---     Greatest _ ('None) = 'True
---     Greatest n (q ':. qs) = If (CmpNat n (NatOf q) == 'GT) (Greatest n qs) 'False
+witCmpNEQ :: forall a b . N a -> N b -> CmpNat a b :/~: 'EQ -> a :/~: b
+witCmpNEQ a b Refl = case compareNat a b of
+    Gt -> equality (Proxy @a) (Proxy @b) (witGt Refl)
+    Lt -> equality (Proxy @a) (Proxy @b) (witLt Refl)
+  where
+    witGt :: CmpNat a b :~: 'GT -> (a T.== b) :~: 'False
+    witGt Refl = Refl
 
--- testGT :: forall (a :: Nat) (b :: Put Nat)
---     .  (KnownNat a, KnownNat (NatOf b))
---     => Proxy ('Put a) -> Proxy b
---     -> Either (CmpNat a (NatOf b) :~: 'GT) (CmpNat a (NatOf b) :/~: 'GT)
--- testGT _ _ =
---   let x = natVal (Proxy @(NatOf b)) in
---   case compare (natVal (Proxy @a)) x of
---       GT -> Left  (Unsafe.unsafeCoerce Refl)
---       _  -> Right (Unsafe.unsafeCoerce Refl)
+    witLt :: CmpNat a b :~: 'LT -> (a T.== b) :~: 'False
+    witLt Refl = Refl
 
--- -- forall q in qs . KnownNat q?
--- witThm1 :: forall (a :: Nat) (b :: Qualifier (Put Nat))
---     .  (KnownNat a)
---     => Proxy ('Put a) -> QualRep b
---     -> (Greatest a     b) :~: 'True
---     -> (Greatest (a+1) b) :~: 'True
--- witThm1 _ (QualNone) _ = Refl
--- witThm1 a (QualPred (b :: Proxy q) (bs :: QualRep qs)) Refl
---   | Refl :: Greatest a (q ':. qs) :~: 'True <- Refl
---   , Refl :: If (CmpNat a (NatOf q) == 'GT) (Greatest a qs) 'False :~: 'True <- Refl
---   = undefined
---   -- = case testGT a b of
---   --       Left  Refl -> _
---   --       Right x    -> case x of {}
+witEQCmp :: N a -> N b -> a :~: b -> CmpNat a b :~: 'EQ
+witEQCmp _ _ Refl = Refl
+
+witNEQCmp :: forall a b . N a -> N b -> a :/~: b -> CmpNat a b :/~: 'EQ
+witNEQCmp a b Refl = case compareNat a b of
+    Gt -> equality (Proxy @a) (Proxy @b) (witGt Refl)
+    Eq -> case witCmpEQ a b Refl of {}
+    Lt -> equality (Proxy @a) (Proxy @b) (witLt Refl)
+  where
+    witGt :: CmpNat a b :~: 'GT -> (a T.== b) :~: 'False
+    witGt Refl = Refl
+
+    witLt :: CmpNat a b :~: 'LT -> (a T.== b) :~: 'False
+    witLt Refl = Refl
+
+witSuccGT :: CmpNat (Succ a) a :~: 'GT
+witSuccGT = Refl
+
+witSuccLT :: CmpNat a (Succ a) :~: 'LT
+witSuccLT = Refl
 
 --------------------------------------------------------------------------------
 -- Fin.

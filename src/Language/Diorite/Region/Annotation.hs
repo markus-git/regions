@@ -10,6 +10,7 @@ import Language.Diorite.Syntax
 import Language.Diorite.Traversal (SmartApply, Args(..))
 import Language.Diorite.Decoration ((:&:)(..))
 import Language.Diorite.Region.Labels (Put(..), Label, Strip, Dress, LblRep, Place)
+import Language.Diorite.Region.Labels.Witness
 
 import qualified Language.Diorite.Signatures as S
 import qualified Language.Diorite.Qualifiers as Q
@@ -23,6 +24,8 @@ import Data.Typeable (Typeable)
 import Data.Proxy (Proxy(..))
 
 import GHC.TypeNats
+
+import Prelude hiding (succ)
 
 --------------------------------------------------------------------------------
 -- * ...
@@ -175,8 +178,8 @@ annotateEta (p@(Ev _ :: Ev p) :\\ e) (S.SigPred _ sig)
 -- cant be a "forall-type" since I need Typeable.
 -- could be a Nat, but then I need to convice GHC that the Nats I produce are "fresh"
 
---nextBetaEv :: Beta sym qs sig -> EvNat (qs)
---nextBetaEv b = EvNat (maxEvBeta b + 1)
+freshEv :: NatRep a -> NatRep (Succ a)
+freshEv = succ
 
 annotateASTF :: forall (sym :: Symbol (Put Nat) *) (p :: Nat) qs a
     .  (Sym sym)
@@ -203,11 +206,11 @@ annotateASTF ast = T.constMatch matchSym matchVar ast
           L.witSDIso sig |-
           S.witTypeable (S.result sig) |-
           --
-          let ((b, l, qs), tr) =
-                let pp  = Proxy :: Proxy p in
-                let a   = Ann (AAt l pp) in
-                let tr' = L.LblAt pp (L.LblConst :: LblRep ('L.Const a)) in
-                (annotateBeta (Sym (sym :&: a)) as (ASym sig) sig none none, tr')
+          let pp  = Proxy :: Proxy p in
+          let tr = L.LblAt pp (L.LblConst :: LblRep ('L.Const a)) in
+          let (b, l, qs) =
+                let a = Ann (AAt l pp) in
+                annotateBeta (Sym (sym :&: a)) as (ASym sig) sig none none
           in
           --
           (b, tr, qs)
@@ -224,7 +227,9 @@ annotateASTF ast = T.constMatch matchSym matchVar ast
            )
     matchVar = undefined
 
-annotate :: forall (sym :: Symbol (Put Nat) *) qs a . Sym sym => ASTF sym qs a -> EBeta (sym :&: Ann) ((>=) qs) ('S.Const a)
+annotate :: forall (sym :: Symbol (Put Nat) *) qs a
+    .  Sym sym => ASTF sym qs a
+    -> EBeta (sym :&: Ann) ((>=) qs) ('S.Const a)
 annotate ast = let (b, _, _) = annotateASTF ast in b
 
 --------------------------------------------------------------------------------
