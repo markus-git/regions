@@ -6,7 +6,7 @@ module Language.Diorite.Decoration
       (:&:)(..)
     , smartSymDecor
     , decorate
-    , stripDecor
+    , strip
     ) where
 
 import Language.Diorite.Signatures (Signature, Result, Sig)
@@ -34,6 +34,9 @@ instance Sym sym => Sym (sym :&: info) where
 
 instance Project sub sup => Project sub (sup :&: info) where
     prj = prj . _sym
+
+-- instance (sub :<: sup) => (sub :&: info) :<: (sup :&: info) where
+--     inj (sub :&: info) = (inj sub) :&: info
 
 -- | Make a "smart" constructor for a symbol decorated with some information.
 smartSymDecor :: forall p (es :: Exists p) sup sub info (sig :: Signature p *) f
@@ -66,16 +69,16 @@ decorate f (b :$ e)    = decorate f b :$ decorateEta e
     decorateEta (Spine b') = Spine (decorate f b')
 
 -- | Strip decorations from every symbol node.
-stripDecor :: Beta (sym :&: info) qs sig -> Beta sym qs sig
-stripDecor (Var n)  = Var n
-stripDecor (Sym s)  = Sym (_sym s)
-stripDecor (b :# p) = stripDecor b :# p
-stripDecor (b :$ e) = stripDecor b :$ stripEta e
+strip :: Beta (sym :&: info) qs sig -> Beta sym qs sig
+strip (Var n)  = Var n
+strip (Sym s)  = Sym (_sym s)
+strip (b :# p) = strip b :# p
+strip (b :$ e) = strip b :$ stripEta e
   where
     stripEta :: Eta (sym :&: info) qs sig -> Eta sym qs sig
     stripEta (n :\  e') = n :\  stripEta e'
     stripEta (p :\\ e') = p :\\ stripEta e'
-    stripEta (Spine b') = Spine (stripDecor b')
+    stripEta (Spine b') = Spine (strip b')
 
 --------------------------------------------------------------------------------
 -- Fin.

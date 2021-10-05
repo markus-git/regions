@@ -283,7 +283,7 @@ instance (Sym sym1, Sym sym2) => Sym (sym1 :+: sym2)
 --------------------------------------------------------------------------------
 
 -- | Partial symbol projection.
-type  Project :: forall k. (k -> *) -> (k -> *) -> Constraint
+type  Project :: forall k . (k -> *) -> (k -> *) -> Constraint
 class Project sub sup where
     prj :: sup a -> Maybe (sub a)
 
@@ -305,7 +305,7 @@ instance {-# OVERLAPS #-} Project sym1 sym3 => Project sym1 (sym2 :+: sym3) wher
 --------------------------------------------------------------------------------
 
 -- | Symbol injection.
-type (:<:) :: forall k. (k -> *) -> (k -> *) -> Constraint
+type (:<:) :: forall k . (k -> *) -> (k -> *) -> Constraint
 class Project sub sup => sub :<: sup where
     inj :: sub a -> sup a
 

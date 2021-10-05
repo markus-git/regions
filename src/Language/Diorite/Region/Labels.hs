@@ -41,10 +41,11 @@ module Language.Diorite.Region.Labels
     , thmGreatestUnique
     ) where
 
-import Language.Diorite.Signatures (Signature, SigRep(..))
+import Language.Diorite.Signatures (Signature, Result, SigRep(..))
 import Language.Diorite.Qualifiers (Qualifier(..), type (:/~:), type (==), If, Remove, Elem, QualRep(..))
 import Language.Diorite.Qualifiers.Witness
 import Language.Diorite.Syntax
+import Language.Diorite.Decoration ((:&:)(..))
 import Language.Diorite.Region.Labels.Witness
 import qualified Language.Diorite.Signatures as S (Signature(..))
 
@@ -209,25 +210,44 @@ data Rgn sig where
 -- ** ...
 
 -- | Introduce a local binding for place 'p', associated with region 'r'.
-local :: forall r (sym :: Symbol (Put r) *) qs (p :: r) a
-    . (Rgn :<: sym, Typeable p, Typeable r)
-    => ASTF sym ('Put p ':. qs) a -> Place p -> ASTF sym qs a
-local ast p = (inj Local :: AST sym 'None (('Put p 'S.:=> 'S.Const a) 'S.:-> 'S.Const a)) :$ (p :\\ Spine ast)
+local :: forall r (sym :: Symbol (Put r) *) qs (p :: r) (info :: Signature (Put r) * -> *) a
+    .  (Rgn :<: sym, Elem ('Put p) qs ~ 'True, Typeable p, Typeable r)
+    => Place p
+    -> info ('S.Const a)
+    -> ASTF (sym :&: info) qs a
+    -> ASTF (sym :&: info) (Remove ('Put p) qs) a
+local p i ast = sym :$ (p :\\ Spine ast)
+  where
+    sym :: AST (sym :&: info) 'None (('Put p 'S.:=> 'S.Const a) 'S.:-> 'S.Const a)
+    sym = Sym (inj Local :&: i)
+
 -- note: Since our region inference rules only introduce bindings at terms with
 --       a first-order type it should be fine to limit 'local' to 'ASTF' values.
 
 -- | Annotate a value-expression with the place to store its result in.
-atBeta :: forall r (sym :: Symbol (Put r) *) qs (p :: r) a
+atBeta :: forall r (sym :: Symbol (Put r) *) qs (info :: Signature (Put r) * -> *) (p :: r) a
     .  (Rgn :<: sym, Remove ('Put p) qs ~ qs)
-    => ASTF sym qs a -> Place p -> ASTF sym ('Put p ':. qs) a
-atBeta ast p = (inj At :: AST sym 'None ('Put p 'S.:=> 'S.Const a 'S.:-> 'S.Const a)) :# p :$ Spine ast
+    => ASTF (sym :&: info) qs a
+    -> info ('S.Const a)
+    -> Place p
+    -> ASTF (sym :&: info) ('Put p ':. qs) a
+atBeta ast i p = sym :# p :$ Spine ast
+  where
+    sym :: AST (sym :&: info) 'None ('Put p 'S.:=> 'S.Const a 'S.:-> 'S.Const a)
+    sym = Sym (inj At :&: i)
 -- note: 'Spine' is for values, hence sep. 'Beta'/'Eta' variants of 'at'.
 
 -- | Annotate a function with the place to store its closure in.
-atEta :: forall r (sym :: Symbol (Put r) *) qs (p :: r) sig
+atEta :: forall r (sym :: Symbol (Put r) *) qs (info :: Signature (Put r) * -> *) (p :: r) sig
     .  (Rgn :<: sym, Remove ('Put p) qs ~ qs)
-    => Eta sym qs sig -> Place p -> AST sym ('Put p ':. qs) sig
-atEta ast p = (inj At :: AST sym 'None ('Put p 'S.:=> sig 'S.:-> sig)) :# p :$ ast
+    => Eta (sym :&: info) qs sig
+    -> info (Result sig)
+    -> Place p
+    -> AST (sym :&: info) ('Put p ':. qs) sig
+atEta ast i p = sym :# p :$ ast
+  where
+    sym :: AST (sym :&: info) 'None ('Put p 'S.:=> sig 'S.:-> sig)
+    sym = Sym (inj At :&: i)
 
 --------------------------------------------------------------------------------
 -- ** ...
