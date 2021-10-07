@@ -66,6 +66,7 @@ data SigRep sig where
     SigConst :: Typeable a => SigRep ('Const a)
     SigPart  :: SigRep a -> SigRep sig -> SigRep (a ':-> sig)
     SigPred  :: Typeable p => Proxy p -> SigRep sig -> SigRep (p ':=> sig)
+-- todo: My '*Rep' types are apparently called singletons?
 
 -- | Valid symbol signatures.
 type  Sig :: forall p . Signature p * -> Constraint

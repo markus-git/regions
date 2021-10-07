@@ -36,9 +36,11 @@ module Language.Diorite.Region.Labels
     , putUnique
     , putDiff
     , Greatest
-    , thmGreatestSucc
-    , thmGreatestPut
-    , thmGreatestUnique
+    , thmGT
+    , thmGTRem
+    , thmGTAny
+    , thmGTSucc
+    , thmGTUnique
     ) where
 
 import Language.Diorite.Signatures (Signature, Result, SigRep(..))
@@ -257,6 +259,8 @@ data QualDict qs where
   DictNone :: QualDict ('None)
   DictPred :: NatRep r -> QualDict qs -> QualDict ('Put r ':. qs)
 
+type D = QualDict
+
 type Puts :: Qualifier (Put Nat) -> Constraint
 class Puts qs where
     puts :: QualDict qs
@@ -277,6 +281,7 @@ putUnique Refl = Refl
 
 putDiff :: forall a b . N a -> N b -> a :/~: b -> 'Put a :/~: 'Put b
 putDiff _ _ Refl = Unsafe.unsafeCoerce (Refl @('False))
+-- todo: Could maybe git rid of this coerce...
 
 --------------------------------------------------------------------------------
 -- ** ...
@@ -286,38 +291,58 @@ type family Greatest r qs where
     Greatest _ ('None) = 'True
     Greatest r ('Put q ':. qs) = If (CmpNat r q == 'GT) (Greatest r qs) 'False
 
-type D = QualDict
+thmGT :: forall a b cs . N a -> N b -> Q cs
+    -> Greatest a ('Put b ':. cs) :~: 'True
+    -> CmpNat a b :~: 'GT
+thmGT a b _ Refl = case compareNat a b of Gt -> Refl
 
-thmGreatestSucc :: forall a b
+thmGTRem :: forall a b cs . N a -> N b -> Q cs
+    -> Greatest a ('Put b ':. cs) :~: 'True
+    -> Greatest a cs :~: 'True
+thmGTRem a b _ Refl = case compareNat a b of Gt -> Refl
+
+thmGTAny :: forall a b cs
+    .  N a -> N b -> Q cs -> D cs
+    -> Greatest a cs :~: 'True
+    -> Elem ('Put b) cs :~: 'True
+    -> CmpNat a b :~: 'GT
+thmGTAny a b (QualPred (c :: Proxy q) (cs :: QualRep qs)) (DictPred (r :: NatRep r) ds) Refl Refl =
+    let bp :: Proxy ('Put b) = Proxy in
+    case compareNat b r of
+        Gt | Refl <- thmGTRem a r cs Refl
+           , Refl <- witCmpNEQ b r Refl
+           , Refl <- putDiff b r Refl
+           , Refl <- withKnownNat b $ witElemRemove bp c (QualPred c cs) Refl
+           -> thmGTAny a b cs ds Refl Refl
+        Eq | Refl <- witCmpEQ b r Refl -> thmGT a r cs Refl
+        Lt | Refl <- thmGTRem a r cs Refl
+           , Refl <- witCmpNEQ b r Refl
+           , Refl <- putDiff b r Refl
+           , Refl <- withKnownNat b $ witElemRemove bp c (QualPred c cs) Refl
+           -> thmGTAny a b cs ds Refl Refl
+
+thmGTSucc :: forall a b
     .  N a -> Q b -> D b
     -> Greatest a b :~: 'True
     -> Greatest (Succ a) b :~: 'True
-thmGreatestSucc _ (QualNone) _ _ = Refl
-thmGreatestSucc a (QualPred _ bs) (DictPred r ds) Refl =
+thmGTSucc _ (QualNone) _ _ = Refl
+thmGTSucc a (QualPred _ bs) (DictPred r ds) Refl =
     case compareNat a r of
         Gt | Refl <- witSuccGT @a
            , Refl <- witCmpTrans (succ a) a r Gt Refl Refl
-           , Refl <- thmGreatestSucc a bs ds Refl
+           , Refl <- thmGTSucc a bs ds Refl
            -> Refl
 
-thmGreatestPut :: forall a b c
-    .  N a -> N b -> Q c
-    -> CmpNat a b :~: 'GT
-    -> Greatest a c :~: 'True
-    -> Greatest a ('Put b ':. c) :~: 'True
-thmGreatestPut _ _ (QualNone) Refl _ = Refl
-thmGreatestPut _ _ (QualPred _ _) Refl Refl = Refl
-
-thmGreatestUnique :: forall a b
+thmGTUnique :: forall a b
   .  N a -> Q b -> D b
   -> Greatest a b :~: 'True
   -> Elem ('Put a) b :~: 'False
-thmGreatestUnique _ (QualNone) _ _ = Refl
-thmGreatestUnique a (QualPred _ bs) (DictPred r ds) Refl =
+thmGTUnique _ (QualNone) _ _ = Refl
+thmGTUnique a (QualPred _ bs) (DictPred r ds) Refl =
     case compareNat a r of
         Gt | Refl <- witCmpNEQ a r Refl
            , Refl <- putDiff a r Refl
-           , Refl <- thmGreatestUnique a bs ds Refl
+           , Refl <- thmGTUnique a bs ds Refl
            -> Refl
 
 --------------------------------------------------------------------------------

@@ -5,7 +5,7 @@
 module Language.Diorite.Traversal
     (
     -- * "Pattern matching" on ASTs.
-      QualArgs(..)
+      Arguments(..)
     , Args(..)
     , SmartApply
     , match
@@ -24,28 +24,40 @@ import qualified Control.Applicative as A
 --------------------------------------------------------------------------------
 
 -- | ...
-type QualArgs :: * -> *
-data QualArgs p = Empty | Fun (Qualifier p) (QualArgs p) | Pre p (QualArgs p)
--- todo: this is basically the "spine" of 'Exists', also causes name-clash.
+type Arguments :: * -> *
+data Arguments p = Empty | Union (Qualifier p) (Arguments p) | Insert p (Arguments p)
+-- todo: This is basically the "spine" of 'Exists'. Funny that the same
+-- "problem" came up again, maybe there's a more general idea/solution? Because
+-- these two types tell me that I'm interested in the structure of my qualifiers
+-- before doing any union/insert (so a not-normal-form-qual-rep?).
 
 -- | List of a symbol's arguments.
-type Args :: forall p . Symbol p * -> QualArgs p -> Signature p * -> *
+type Args :: forall p . Symbol p * -> Arguments p -> Signature p * -> *
 data Args sym qs sig where
     Nil  :: Args sym 'Empty ('Const a)
-    (:*) :: Eta sym ps a -> Args sym qs sig -> Args sym ('Fun ps qs) (a ':-> sig)
-    (:~) :: Ev p -> Args sym qs sig -> Args sym ('Pre p qs) (p ':=> sig)
+    (:*) :: Eta sym ps a -> Args sym qs sig -> Args sym ('Union ps qs) (a ':-> sig)
+    (:~) :: Ev p -> Args sym qs sig -> Args sym ('Insert p qs) (p ':=> sig)
 
 infixr :*, :~
 
+--------------------------------------------------------------------------------
+-- ** ...
+  
 -- | ...
-type SmartApply :: forall p . Qualifier p -> QualArgs p -> Qualifier p
+type SmartApply :: forall p . Qualifier p -> Arguments p -> Qualifier p
 type family SmartApply qs ex where
-    SmartApply qs ('Empty)     = qs
-    SmartApply qs ('Fun ps rs) = SmartApply (Union qs ps) rs
-    SmartApply qs ('Pre p ps)  = SmartApply (p ':. qs) ps
+    SmartApply qs ('Empty)       = qs
+    SmartApply qs ('Union ps rs) = SmartApply (Union qs ps) rs
+    SmartApply qs ('Insert p ps) = SmartApply (p ':. qs) ps
 
 --------------------------------------------------------------------------------
-  
+-- ** ...
+
+-- ...
+
+--------------------------------------------------------------------------------
+-- ** Traversals via pattern matching.
+    
 -- | \"Pattern match\" on a fully applied 'AST' using:
 --   1. a \"symbol\" function that gets direct access to the top-most symbol and
 --      its sub-trees given as 'Args'.
@@ -55,10 +67,10 @@ type family SmartApply qs ex where
 match :: forall p sym qs a (c :: Signature p * -> *)
     .  (forall rs sig . ('Const a ~ Result sig, qs ~ SmartApply 'None rs)
             => sym sig -> Args sym rs sig -> c ('Const a))
-       -- ^ Match on a symbol (ps ~ qs).
+       -- ^ Match on a symbol.
     -> (forall ps rs sig . ('Const a ~ Result sig, qs ~ SmartApply ps rs, Sig sig)
             => Name -> QualRep ps -> Args sym rs sig -> c ('Const a))
-       -- ^ Lookup and instantiate a variable (rs + ps ~ qs).
+       -- ^ Lookup and instantiate a variable.
     -> ASTF sym qs a
        -- ^ Expression to traverse.
     -> c ('Const a)

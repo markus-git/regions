@@ -1,5 +1,7 @@
 {-# OPTIONS_GHC -Wall #-}
 
+{-# LANGUAGE TypeApplications #-}
+
 module Rgn where
 
 import Language.Diorite.Signatures
@@ -8,7 +10,8 @@ import Language.Diorite.Qualifiers
 import Language.Diorite.Syntax
 import Language.Diorite.Decoration
 import Language.Diorite.Interpretation
-import qualified Language.Diorite.Region.Annotate as A
+import qualified Language.Diorite.Region.Annotation as A
+import qualified Language.Diorite.Region.Labels as L
 
 --------------------------------------------------------------------------------
 -- * ...
@@ -34,7 +37,7 @@ instance Render D where
     renderSym (A)   = "let"
 
 type B :: * -> *
-type B a = Beta D ('None :: Qualifier (A.Put *)) ('Const a)
+type B a = Beta D ('None :: Qualifier (L.Put *)) ('Const a)
 
 --------------------------------------------------------------------------------
 
@@ -58,13 +61,13 @@ ex2 = share (int 2) (\x -> add (int 1) x)
 
 --------------------------------------------------------------------------------
 
-type E a = A.ExLBeta (D :&: A.LBeta) ((A.>=) 'None) ('Const a :: Signature (A.Put *) *)
+type E a = A.EBeta (D :&: A.Ann) ((A.>=) 'None) ('Const @(L.Put *) a)
 
 ann :: B Int -> E Int
 ann = A.annotate
 
 pr :: E Int -> IO ()
-pr (A.ExLBeta b _) = putStrLn (show b)
+pr (A.EBeta b _) = putStrLn (show b)
 
 --------------------------------------------------------------------------------
 -- Fin.

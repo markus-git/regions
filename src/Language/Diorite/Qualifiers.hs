@@ -33,7 +33,7 @@ module Language.Diorite.Qualifiers
     , witQual
     ) where
 
-import Data.Constraint (Dict(..))
+import Data.Constraint (Constraint, Dict(..))
 import Data.Proxy (Proxy(..))
 import Data.Type.Equality ((:~:)(..), testEquality)
 import Data.Typeable (Typeable, eqT)
@@ -123,6 +123,7 @@ data QualRep qs where
     QualPred  :: Typeable q => Proxy q -> QualRep qs -> QualRep (q ':. qs)
 
 -- | Valid symbol qualifiers.
+type Qual :: forall p . Qualifier p -> Constraint
 class Qual qs where
     qualifier :: QualRep qs
 

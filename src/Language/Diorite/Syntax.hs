@@ -89,7 +89,8 @@ data Eta sym qs sig where
     -- ^ Abstraction.
     (:\)  :: Sig a => Name -> Eta sym qs sig -> Eta sym qs (a ':-> sig)
     -- ^ Evidence-abstraction.
-    (:\\) :: (Elem q qs ~ 'True) => Ev q -> Eta sym qs sig -> Eta sym (Remove q qs) (q ':=> sig)
+    (:\\) :: (Elem q qs ~ 'True) => Ev q -> Eta sym qs sig
+        -> Eta sym (Remove q qs) (q ':=> sig)
 
 infixl 1 :$, :#
 infixr 9 :\, :\\
@@ -106,6 +107,7 @@ class Sym sym where
     symbol :: sym sig -> SigRep sig
 
 --------------------------------------------------------------------------------
+-- ** ...
 
 -- | Get the highest variable name bound for an 'Eta'.
 maxNameEta :: Eta sym qs a -> Name
@@ -127,6 +129,7 @@ lam f = v :\ body
     body = f $ Var v
 
 --------------------------------------------------------------------------------
+-- ** ...
 
 -- | Get the highest evidence name bound for an 'Eta'.
 maxEvEta :: Eta sym qs a -> Name
@@ -148,47 +151,24 @@ elam f = Ev v :\\ body
     body = f $ Ev v
 
 --------------------------------------------------------------------------------
--- ** "Smart" constructors.
+-- * "Smart" constructors.
+--------------------------------------------------------------------------------
 
 -- | ...
 type Exists :: * -> *
-data Exists p = Empty | Fun (Exists p) (Exists p) | Pre p (Exists p)
--- note: Since existential quantification isn't really a thing in Haskell I have
---       these 'Exists' like types to distribute qualifiers. Not sure what a
---       better named for it would be...
-
--- | ...
-type Unique :: forall p . p -> Exists p -> *
-type Unique q qs = Remove q (SmartQual qs) :~: (SmartQual qs)
--- todo: Turn this into a class constraint?
-
--- | ...
-type ExRep :: forall p . Exists p -> *
-data ExRep es where
-    ExEmpty :: ExRep 'Empty
-    ExUnion :: ExRep qs -> ExRep ps -> ExRep ('Fun qs ps)
-    ExPred  :: Typeable q => Unique q qs -> Proxy q -> ExRep qs -> ExRep ('Pre q qs)
-
-class Ex es where
-    record :: ExRep es
-
-instance Ex ('Empty) where
-    record = ExEmpty
-
-instance (Ex qs, Ex ps) => Ex ('Fun qs ps) where
-    record = ExUnion record record
-
-instance (Typeable q, Remove q (SmartQual qs) ~ (SmartQual qs), Ex qs) => Ex ('Pre q qs) where
-    record = ExPred Refl Proxy record
-
---------------------------------------------------------------------------------
+data Exists p = Empty | Union (Exists p) (Exists p) | Insert p (Exists p)
+-- todo: Since existential quantification isn't really a thing in Haskell I have
+-- these 'Exists'-like types to distribute qualifiers. Still a bad name though..
 
 -- | Map a symbol to its corresponding "smart" constructor.
-type SmartBeta :: forall p . Symbol p * -> Qualifier p -> Exists p -> Signature p * -> *
+type SmartBeta :: forall p
+    .  Symbol p * -> Qualifier p -> Exists p -> Signature p * -> *
 type family SmartBeta sym qs ex sig where
-    SmartBeta sym qs ('Empty)     ('Const a) = Beta sym qs ('Const a)
-    SmartBeta sym qs ('Fun ps rs) (a ':-> b) = SmartBeta sym 'None ps a -> SmartBeta sym (Union qs (SmartQual ps)) rs b
-    SmartBeta sym qs ('Pre q rs)  (q ':=> b) = Ev q -> SmartBeta sym (q ':. qs) rs b
+    SmartBeta sym qs ('Empty) ('Const a) = Beta sym qs ('Const a)
+    SmartBeta sym qs ('Union ps rs) (a ':-> b) =
+        SmartBeta sym 'None ps a -> SmartBeta sym (Union qs (SmartQual ps)) rs b
+    SmartBeta sym qs ('Insert q rs) (q ':=> b) =
+        Ev q -> SmartBeta sym (q ':. qs) rs b
 
 -- | Reconstruct a symbol's signature.
 type SmartSig :: forall p . * -> Signature p *
@@ -200,16 +180,16 @@ type family SmartSig f where
 -- | ...
 type SmartQual :: forall p . Exists p -> Qualifier p
 type family SmartQual es where
-    SmartQual ('Empty)     = 'None
-    SmartQual ('Fun ps qs) = Union (SmartQual ps) (SmartQual qs)
-    SmartQual ('Pre _  qs) = SmartQual qs
+    SmartQual ('Empty)        = 'None
+    SmartQual ('Union ps qs)  = Union (SmartQual ps) (SmartQual qs)
+    SmartQual ('Insert _  qs) = SmartQual qs
 
 -- | ...
 type SmartEx :: forall p . * -> Exists p
 type family SmartEx f where
     SmartEx (AST _ _ _) = 'Empty
-    SmartEx (Ev p -> f) = 'Pre p (SmartEx f)
-    SmartEx (a -> f)    = 'Fun (SmartEx a) (SmartEx f)
+    SmartEx (Ev p -> f) = 'Insert p (SmartEx f)
+    SmartEx (a -> f)    = 'Union (SmartEx a) (SmartEx f)
 
 -- | Fetch the symbol of a "smart" constructor.
 type SmartSym :: forall p . * -> Symbol p *
@@ -218,16 +198,43 @@ type family SmartSym f where
     SmartSym (Ev _ -> f) = SmartSym f
     SmartSym (_ -> f)    = SmartSym f
 
+--------------------------------------------------------------------------------
+-- *** ...
+
+-- | ...
+type ExRep :: forall p . Exists p -> *
+data ExRep es where
+    ExEmpty  :: ExRep 'Empty
+    ExUnion  :: ExRep qs -> ExRep ps -> ExRep ('Union qs ps)
+    ExInsert :: (Typeable q, Remove q (SmartQual qs) ~ SmartQual qs)
+        => Proxy q -> ExRep qs -> ExRep ('Insert q qs)
+
+class Ex es where
+    record :: ExRep es
+
+instance Ex ('Empty) where
+    record = ExEmpty
+
+instance (Ex qs, Ex ps) => Ex ('Union qs ps) where
+    record = ExUnion record record
+
+instance (Typeable q, Remove q (SmartQual qs) ~ (SmartQual qs), Ex qs)
+    => Ex ('Insert q qs)
+  where
+    record = ExInsert Proxy record
+
 -- | ...
 smartQual :: ExRep es -> QualRep (SmartQual es)
 smartQual (ExEmpty)       = QualNone
 smartQual (ExUnion qs ps) = union (smartQual qs) (smartQual ps)
-smartQual (ExPred _ _ qs) = smartQual qs
+smartQual (ExInsert _ qs) = smartQual qs
 
 --------------------------------------------------------------------------------
+-- *** ...
 
 -- | Make a "smart" constructor for a symbol.
-smartSym' :: forall p (es :: Exists p) (sym :: Symbol p *) (sig :: Signature p *) (f :: *)
+smartSym' ::
+    forall p (es :: Exists p) (sym :: Symbol p *) (sig :: Signature p *) (f :: *)
     .  ( Sig sig
        , Ex es
        , f   ~ SmartBeta sym 'None es sig
@@ -238,25 +245,32 @@ smartSym' :: forall p (es :: Exists p) (sym :: Symbol p *) (sig :: Signature p *
     => sym sig -> f
 smartSym' sym = smartBeta (record :: ExRep es) (signature :: SigRep sig) (Sym sym)
   where
-    smartBeta :: forall e q a . ExRep e -> SigRep a -> Beta sym q a -> SmartBeta sym q e a
+    smartBeta :: forall e q a
+        .  ExRep e -> SigRep a -> Beta sym q a
+        -> SmartBeta sym q e a
     smartBeta (ExEmpty) (SigConst) ast = ast
     smartBeta (ExUnion x y) (SigPart a b) ast =
         \f -> smartBeta y b (ast :$ smartEta x QualNone a f)
-    smartBeta (ExPred _ p y) (SigPred p' b) ast | Just Refl <- eqP p p' =
+    smartBeta (ExInsert p y) (SigPred p' b) ast | Just Refl <- eqP p p' =
         \e -> smartBeta y b (ast :# e)
     smartBeta _ _ _ = error "What?!"
 
-    smartEta :: forall e q a . ExRep e -> QualRep q -> SigRep a -> SmartBeta sym q e a -> Eta sym (Union q (SmartQual e)) a
+    smartEta :: forall e q a
+        .  ExRep e -> QualRep q -> SigRep a -> SmartBeta sym q e a
+        -> Eta sym (Union q (SmartQual e)) a
     smartEta (ExEmpty) q (SigConst) f =
         witUniIdent q |- Spine f
-    smartEta (ExUnion (x :: ExRep x) (y :: ExRep y)) q (SigPart a b) f =
-        witSig a |- witUniAssoc q fx fy |- lam (smartEta y (union q fx) b . f . smartBeta x a)
+    smartEta (ExUnion x y) q (SigPart a b) f =
+        witSig a |-
+        witUniAssoc q fx fy |-
+        lam (smartEta y (union q fx) b . f . smartBeta x a)
       where
         fx = smartQual x
         fy = smartQual y
-    smartEta (ExPred Refl (p :: Proxy x) y) q (SigPred p' b) f | Just Refl <- eqP p p' =
+    smartEta (ExInsert p y) q (SigPred p' b) f | Just Refl <- eqP p p' =
         elam (smartEta y (QualPred p q) b . f)
     smartEta _ _ _ _ = error "What?!"
+-- todo: convice Haskell the "otherwise"-cases are impossible.
 
 --------------------------------------------------------------------------------
 -- * Open symbol domains.

@@ -16,6 +16,7 @@ import qualified Unsafe.Coerce as Unsafe (unsafeCoerce)
 --
 -- > General:
 -- witEqSym         :: (a == b) :~: (b == a)
+-- witEqIf          :: If (a == b) c c :~: c
 --
 -- > Insert:
 -- witInsIdem       :: Insert a (Insert a b) :~: Insert a b
@@ -97,6 +98,12 @@ witEqSym a b =
             Right Refl -> Refl
 {-# NOINLINE witEqSym #-}
 {-# RULES "witEqSym" forall a b . witEqSym a b = Unsafe.unsafeCoerce Refl #-}
+
+witEqIf :: forall a b c . (T a, T b) => P a -> P b -> If (a == b) c c :~: c
+witEqIf a b =
+    case testEq a b of
+        Left  Refl -> Refl
+        Right Refl -> Refl
 
 --------------------------------------------------------------------------------
 -- Insert.

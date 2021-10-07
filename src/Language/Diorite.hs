@@ -14,7 +14,7 @@ module Language.Diorite
     ) where
 
 import Language.Diorite.Signatures
-import Language.Diorite.Qualifiers hiding (QualArgs(..))
+import Language.Diorite.Qualifiers
 import Language.Diorite.Syntax
 import Language.Diorite.Sugar
 import Language.Diorite.Interpretation
