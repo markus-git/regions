@@ -138,24 +138,27 @@ annotateBeta :: forall (sym :: Symbol (Put Nat) *) qs ps eps rs sig l (n :: Nat)
     -> Args sym rs sig
     -> ABeta @Nat l
     -> SigRep sig
+    -> QualRep qs
+    -> L.QualDict qs
     -> QualRep ps
     -> QualRep eps
+    -> L.QualDict eps
     -> NatRep n
     -> ( EBeta (sym :&: Ann @Nat) ((>=) qs) ('Const @(Put Nat) a)
        , ABeta ('L.Const @Nat a)
-       , QualRep qs
        )
-annotateBeta b Nil l (S.SigConst) ps eps n = L.withKnownNat n $ 
+annotateBeta b Nil l (S.SigConst) qs qsd ps eps epsd n = L.withKnownNat n $ 
     let b'   = atBeta b (Ann (AAt l (Proxy :: Proxy n))) n in
     let eps' = Q.QualPred (Proxy :: Proxy ('Put n)) eps in
     --
-    Q.witExtCons (Proxy :: Proxy ('Put n)) ps eps Refl |-
+    let pn = Proxy :: Proxy ('Put n) in
+    Q.witExtCons pn ps eps Refl |-
     L.thmGTSucc n eps undefined Refl |-
     L.witSuccGT @n |-
     --
-    (EBeta b' eps' (L.succ n), l, ps)
-annotateBeta b ((e :: Eta sym xs x) :* (as :: Args sym ys y)) l (S.SigPart a sig) ps eps n
-    | Refl :: Strip l :~: (x ':-> y)             <- Refl
+    (EBeta b' eps' (L.succ n), l)
+annotateBeta b ((e :: Eta sym xs x) :* (as :: Args sym ys y)) l (S.SigPart a sig) qs qsd ps eps epsd n
+    | Refl :: Strip l :~: (x ':-> y) <- Refl
     , Refl :: l       :~: (Dress x 'L.:-> Dress y) <- Refl
     --
     = case annotateEta e a of
@@ -171,7 +174,7 @@ annotateBeta b ((e :: Eta sym xs x) :* (as :: Args sym ys y)) l (S.SigPart a sig
              --
              undefined
              --annotateBeta b' as l'' sig ps' eps' _
-annotateBeta b ((p@(Ev _) :: Ev p) :~ (as :: Args sym ys y)) l (S.SigPred pp sig) ps eps n
+annotateBeta b ((p@(Ev _) :: Ev p) :~ (as :: Args sym ys y)) l (S.SigPred pp sig) qs qsd ps eps epsd n
     | Refl :: qs :~: SmartApply ps ('T.Insert p ys) <- Refl
     , Refl :: qs :~: SmartApply (p ':. ps) ys <- Refl
     , Refl :: L.Greatest n qs :~: 'True <- Refl
@@ -183,13 +186,13 @@ annotateBeta b ((p@(Ev _) :: Ev p) :~ (as :: Args sym ys y)) l (S.SigPred pp sig
     , Refl :: Elem p qs :~: 'True
         <- witElemPre
              (Proxy :: Proxy p)
-             (undefined :: QARep ys)
+             (undefined :: ArgsNRep ys)
              (ps :: QualRep ps)
     , Refl :: CmpNat n x :~: 'GT
         <- L.thmGTAny n
              (undefined :: NatRep x)
-             (undefined :: QualRep qs) -- hard
-             (undefined :: L.QualDict qs) -- hard
+             (qs   :: QualRep qs)
+             (qsd  :: L.QualDict qs)
              (Refl :: L.Greatest n qs :~: 'True)
              (Refl :: Elem p qs :~: 'True)
     , Refl :: L.Greatest n (p ':. eps) :~: 'True <- Refl
@@ -197,7 +200,7 @@ annotateBeta b ((p@(Ev _) :: Ev p) :~ (as :: Args sym ys y)) l (S.SigPred pp sig
     , Refl :: Elem ('Put n) (p ':. eps) :~: 'False
         <- L.thmGTUnique n
              (Q.QualPred pp eps :: QualRep (p ':. eps))
-             (undefined :: L.QualDict (p ':. eps)) -- easy
+             (L.DictPred undefined epsd :: L.QualDict (p ':. eps))
              (Refl :: L.Greatest n (p ':. eps) :~: 'True)
     , Refl :: Remove ('Put n) (p ':. eps) :~: (p ':. eps)
         <- Q.witElemId
@@ -205,15 +208,13 @@ annotateBeta b ((p@(Ev _) :: Ev p) :~ (as :: Args sym ys y)) l (S.SigPred pp sig
              (Q.QualPred pp eps :: QualRep (p ':. eps))
              (Refl)
     --
-    = let b'   = b :# p in
-      let ps'  = Q.QualPred pp ps in
-      let eps' = Q.QualPred pp eps in
-      let l'   = AEApp l p in
+    = let b'    = b :# p in
+      let ps'   = Q.QualPred pp ps in
+      let eps'  = Q.QualPred pp eps in
+      let epsd' = L.DictPred undefined epsd in
+      let l'    = AEApp l p in
       --
-      --undefined
-      annotateBeta b' as l' sig ps' eps' n
--- todo: qualrep  of (SmartApply ps rs) ~ qs
--- todo: qualdict of (SmartApply ps rs) ~ qs
+      annotateBeta b' as l' sig qs qsd ps' eps' epsd' n
 
 annotateEta :: forall (sym :: Symbol (Put Nat) *) qs (n :: Nat) (m :: Nat) sig
     .  ( Sym sym
@@ -277,23 +278,26 @@ annotateSym :: forall (sym :: Symbol (Put Nat) *) sig qs rs a (n :: Nat)
        , L.Rgn :<: sym
        , L.Greatest n qs ~ 'True
        )
-    => NatRep n -> sym sig -> Args sym rs sig
+    => NatRep n
+    -> QualRep qs
+    -> L.QualDict qs
+    -> sym sig
+    -> Args sym rs sig
     -> ( EBeta (sym :&: Ann @Nat) ((>=) qs) ('Const @(Put Nat) a)
        , LblRep ('L.Const @Nat a)
-       , QualRep qs
        )
-annotateSym n sym as =
+annotateSym n qs qsd sym as =
     let none = Q.QualNone in
     let sig  = symbol sym in
     --
     L.witSDIso sig |-
     S.witTypeable (S.result sig) |-
     --
-    let (b, l, qs) =
+    let (b, l) =
           let a = Ann (AAt l Proxy) in
-          annotateBeta (Sym (sym :&: a)) as (ASym sig) sig none none n
+          annotateBeta (Sym (sym :&: a)) as (ASym sig) sig qs qsd none none L.DictNone n
     in
-    (b, L.LblConst @a, qs)    
+    (b, L.LblConst @a)    
 
 -- | ...
 annotateASTF :: forall (sym :: Symbol (Put Nat) *) (n :: Nat) qs a
@@ -302,43 +306,37 @@ annotateASTF :: forall (sym :: Symbol (Put Nat) *) (n :: Nat) qs a
        , L.Greatest n qs ~ 'True
        )
     => NatRep n
+    -> QualRep qs
+    -> L.QualDict qs
     -> ASTF sym qs a
     -> ( EBeta (sym :&: Ann @Nat) ((>=) qs) ('Const @(Put Nat) a)
        , LblRep ('L.Const @Nat a)
-       , QualRep qs
        )
-annotateASTF n = T.constMatch (annotateSym n) undefined
+annotateASTF n qs qsd = T.constMatch (annotateSym n qs qsd) undefined
 
--- annotate :: forall (sym :: Symbol (Put Nat) *) qs a
---     .  ( Sym sym
---        , L.Rgn :<: sym
---        )
---     => ASTF sym qs a
---     -> EBeta (sym :&: Ann) ((>=) qs) ('Const a)
--- annotate ast = let (b, _, _) = annotateASTF ast zero in b
+annotate :: forall (sym :: Symbol (Put Nat) *) qs a
+    .  ( Sym sym
+       , L.Rgn :<: sym
+       )
+    => ASTF sym qs a
+    -> EBeta (sym :&: Ann) ((>=) qs) ('Const a)
+annotate ast = undefined -- fst (annotateASTF ast zero)
 
 --------------------------------------------------------------------------------
 -- * ...
 --------------------------------------------------------------------------------
 
-type QARep :: forall p . T.Arguments p -> *
-data QARep qs where
-    QAEmpty :: QARep ('T.Empty)
-    QAFun   :: QualRep qs -> QARep ps -> QARep ('T.Union qs ps)
-    QAPre   :: Typeable q => Proxy q -> QARep qs -> QARep ('T.Insert q qs)
+type ArgsNRep :: T.Arguments (Put Nat) -> *
+data ArgsNRep qs where
+    ArgsEmpty  :: ArgsNRep ('T.Empty)
+    ArgsUnion  :: QualRep qs -> ArgsNRep ps -> ArgsNRep ('T.Union qs ps)
+    ArgsInsert :: NatRep n -> ArgsNRep qs -> ArgsNRep ('T.Insert ('Put n) qs)
 
-type QArgs :: forall p . T.Arguments p -> Constraint
-class QArgs qs where
-    args :: QARep qs
+type NArgs :: T.Arguments (Put Nat) -> Constraint
+class NArgs qs where
+    record :: ArgsNRep qs
 
-instance QArgs ('T.Empty) where
-    args = QAEmpty
-
-instance (Q.Qual qs, QArgs ps) => QArgs ('T.Union qs ps) where
-    args = QAFun Q.qualifier args
-
-instance (Typeable q, QArgs qs) => QArgs ('T.Insert q qs) where
-    args = QAPre Proxy args
+--instance NArgs 
     
 --------------------------------------------------------------------------------
 -- ** ...
@@ -346,21 +344,24 @@ instance (Typeable q, QArgs qs) => QArgs ('T.Insert q qs) where
 witArgsElem :: forall a as bs . Typeable a
     => Proxy a
     -> QualRep as
-    -> QARep bs
+    -> ArgsNRep bs
     -> Elem a as :~: 'True
     -> Elem a (SmartApply as bs) :~: 'True
-witArgsElem _ _ (QAEmpty) el = el
-witArgsElem a as (QAFun qs ps) el
-  | Refl <- Q.witElemUni a as qs el
-  = witArgsElem a (Q.union as qs) ps Refl
-witArgsElem a as (QAPre (q :: Proxy q) qs) Refl
-  | Refl :: Q.If (a Q.== q) 'True 'True :~: 'True <- Q.witEqIf a q
-  = witArgsElem a (Q.QualPred q as) qs Refl
+witArgsElem _ _ (ArgsEmpty) el = el
+witArgsElem a as (ArgsUnion qs ps) el
+    | Refl <- Q.witElemUni a as qs el
+    = witArgsElem a (Q.union as qs) ps Refl
+witArgsElem a as (ArgsInsert (n :: NatRep n) qs) Refl
+    | Dict :: Dict (KnownNat n) <- L.withKnownNat n Dict
+    , Refl <- Q.witEqIf @_ @_ @('True) a pn
+    = witArgsElem a (Q.QualPred pn as) qs Refl
+  where
+    pn = Proxy :: Proxy ('Put n)
 -- todo: how to apply type 'True to witEqIf for c?
 
 witElemPre :: forall a as bs . Typeable a
     => Proxy a
-    -> QARep as
+    -> ArgsNRep as
     -> QualRep bs
     -> Elem a (SmartApply bs ('T.Insert a as)) :~: 'True
 witElemPre a as bs = witArgsElem a (Q.QualPred a bs) as Refl
