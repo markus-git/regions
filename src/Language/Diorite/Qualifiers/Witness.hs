@@ -58,6 +58,11 @@ import qualified Unsafe.Coerce as Unsafe (unsafeCoerce)
 -- witSubRefl       :: Subset a a :~: 'True
 -- witSubUni        :: Subset a (Union a b) :~: 'True
 -- witSubTrans      :: Subset a b :~: 'True -> Subset b c :~: 'True -> Subset a c :~: 'True
+-- >> Subset & Union (SU):
+-- witSURemove      :: Elem a d :~: 'True -> Subset (Union b (Remove a c)) d :~: Subset (Union b c) d
+-- witSUCons        :: Elem a d :~: 'True -> Subset (Union b c) d :~: Subset (Union b (a ':. c)) d
+-- witSURefl        :: Subset (Union a b) c :~: Subset (Union b a) c
+-- witSURefl'       :: Subset a (Union b c) :~: Subset a (Union c b)
 --
 -- > Extends:
 -- witExtRefl       :: Extends a a :~: 'True
@@ -71,12 +76,10 @@ import qualified Unsafe.Coerce as Unsafe (unsafeCoerce)
 -- witExtShrink     :: Elem a c :~: 'True -> Extends (Remove a b) (Remove a c) :~: Extends b c
 -- witExtRemove     :: Extends b c :~: 'True -> Extends (Remove a b) c :~: 'True
 -- witExtTrans      :: Extends a b :~: 'True -> Extends b c :~: 'True -> Extends a c :~: 'True
---
--- > Subset & Union (SU):
--- witSURemove :: Elem a d :~: 'True -> Subset (Union b (Remove a c)) d :~: Subset (Union b c) d
--- witSUCons   :: Elem a d :~: 'True -> Subset (Union b c) d :~: Subset (Union b (a ':. c)) d
--- witSURefl   :: Subset (Union a b) c :~: Subset (Union b a) c
--- witSURefl'  :: Subset a (Union b c) :~: Subset a (Union c b)
+-- >> Extends & Union (EU):
+-- witEUAdd         :: Extends a b :~: 'True -> Extends a (Union b c) :~: 'True
+-- witEURefl        :: Extends a (Union b c) :~: Extends a (Union c b)
+-- witEUBoth        :: Extends a b :~: 'True -> Extends c d :~: 'True -> Extends (Union a c) (Union b d) :~: 'True
 --
 --------------------------------------------------------------------------------
 
@@ -459,6 +462,49 @@ witSubTrans (QualPred a as) b c Refl Refl
 {-# RULES "witSubTrans" forall a b c . witSubTrans a b c Refl Refl = Unsafe.unsafeCoerce Refl #-}
 
 --------------------------------------------------------------------------------
+-- Subset & Union (SU).
+
+witSURemove :: forall a b c d . T a => P a -> Q b -> Q c -> Q d -> Elem a d :~: 'True -> Subset (Union b (Remove a c)) d :~: Subset (Union b c) d
+witSURemove a (QualNone) c d Refl | Refl <- witSubRemove a c d Refl = Refl
+witSURemove a (QualPred b bs) c d Refl =
+    case testElem b d of
+        Left  Refl
+          | Refl <- witRemOrd b a c
+          , Refl <- witSURemove a bs (remove b c) d Refl
+          -> Refl
+        Right Refl -> Refl
+
+witSUCons :: forall a b c d . T a => P a -> Q b -> Q c -> Q d -> Elem a d :~: 'True -> Subset (Union b c) d :~: Subset (Union b (a ':. c)) d
+witSUCons _ (QualNone) _ _ Refl = Refl
+witSUCons a (QualPred b bs) c d Refl =
+    case testElem b d of
+        Left  Refl -> case testEq b a of
+            Left  Refl | Refl <- witSURemove a bs c d Refl -> Refl
+            Right Refl | Refl <- witSUCons a bs (remove b c) d Refl -> Refl
+        Right Refl -> Refl
+    
+witSURefl :: forall a b c . Q a -> Q b -> Q c -> Subset (Union a b) c :~: Subset (Union b a) c
+witSURefl (QualNone) b _ | Refl <- witUniIdent b = Refl
+witSURefl (QualPred a as) b c =
+    case testElem a c of
+        Left  Refl
+          | Refl <- witSURemove a as b c Refl
+          , Refl <- witSURefl as b c
+          , Refl <- witSUCons a b as c Refl
+          -> Refl
+        Right Refl
+          | Refl <- witElemCons a b as
+          , Refl <- witSubNotIn a (union b (QualPred a as)) c Refl Refl
+          -> Refl
+
+witSURefl' :: forall a b c . Q a -> Q b -> Q c -> Subset a (Union b c) :~: Subset a (Union c b)
+witSURefl' (QualNone) _ _ = Refl
+witSURefl' (QualPred a as) b c
+  | Refl <- witElemUniRefl a b c
+  , Refl <- witSURefl' as b c
+  = Refl
+
+--------------------------------------------------------------------------------
 -- Extends.
 
 witExtRefl :: forall a . Q a -> Extends a a :~: 'True
@@ -632,49 +678,6 @@ witEUBoth (QualPred a as) b c d Refl Refl
           , Refl <- witExtRemove a c d Refl
           , Refl <- witEUBoth as (remove a b) (remove a c) (remove a d) Refl Refl
           -> Refl
-
---------------------------------------------------------------------------------
--- Subset & Union (SU).
-
-witSURemove :: forall a b c d . T a => P a -> Q b -> Q c -> Q d -> Elem a d :~: 'True -> Subset (Union b (Remove a c)) d :~: Subset (Union b c) d
-witSURemove a (QualNone) c d Refl | Refl <- witSubRemove a c d Refl = Refl
-witSURemove a (QualPred b bs) c d Refl =
-    case testElem b d of
-        Left  Refl
-          | Refl <- witRemOrd b a c
-          , Refl <- witSURemove a bs (remove b c) d Refl
-          -> Refl
-        Right Refl -> Refl
-
-witSUCons :: forall a b c d . T a => P a -> Q b -> Q c -> Q d -> Elem a d :~: 'True -> Subset (Union b c) d :~: Subset (Union b (a ':. c)) d
-witSUCons _ (QualNone) _ _ Refl = Refl
-witSUCons a (QualPred b bs) c d Refl =
-    case testElem b d of
-        Left  Refl -> case testEq b a of
-            Left  Refl | Refl <- witSURemove a bs c d Refl -> Refl
-            Right Refl | Refl <- witSUCons a bs (remove b c) d Refl -> Refl
-        Right Refl -> Refl
-    
-witSURefl :: forall a b c . Q a -> Q b -> Q c -> Subset (Union a b) c :~: Subset (Union b a) c
-witSURefl (QualNone) b _ | Refl <- witUniIdent b = Refl
-witSURefl (QualPred a as) b c =
-    case testElem a c of
-        Left  Refl
-          | Refl <- witSURemove a as b c Refl
-          , Refl <- witSURefl as b c
-          , Refl <- witSUCons a b as c Refl
-          -> Refl
-        Right Refl
-          | Refl <- witElemCons a b as
-          , Refl <- witSubNotIn a (union b (QualPred a as)) c Refl Refl
-          -> Refl
-
-witSURefl' :: forall a b c . Q a -> Q b -> Q c -> Subset a (Union b c) :~: Subset a (Union c b)
-witSURefl' (QualNone) _ _ = Refl
-witSURefl' (QualPred a as) b c
-  | Refl <- witElemUniRefl a b c
-  , Refl <- witSURefl' as b c
-  = Refl
 
 --------------------------------------------------------------------------------
 

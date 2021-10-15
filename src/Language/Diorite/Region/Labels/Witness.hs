@@ -27,8 +27,8 @@ import Prelude hiding (pred)
 -- its better to simply use 'T.==' in the long run.
 --
 -- The difference between the two is the extra application rule for 'T.==',
--- which neither witnesses from Q nor here relies on ('Succ a' = 'a + 1', which
--- is handled by the Presburger plugin).
+-- which neither witnesses from Q nor these rely on ('Succ a' = 'a + 1' is
+-- handled by the Presburger plugin).
 --
 -- todo: Try again with 'Data.Type.Equality.=='?
 

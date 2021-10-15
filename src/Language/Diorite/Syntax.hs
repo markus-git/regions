@@ -89,8 +89,7 @@ data Eta sym qs sig where
     -- ^ Abstraction.
     (:\)  :: Sig a => Name -> Eta sym qs sig -> Eta sym qs (a ':-> sig)
     -- ^ Evidence-abstraction.
-    (:\\) :: (Elem q qs ~ 'True) => Ev q -> Eta sym qs sig
-        -> Eta sym (Remove q qs) (q ':=> sig)
+    (:\\) :: (Elem q qs ~ 'True) => Ev q -> Eta sym qs sig -> Eta sym (Remove q qs) (q ':=> sig)
 
 infixl 1 :$, :#
 infixr 9 :\, :\\

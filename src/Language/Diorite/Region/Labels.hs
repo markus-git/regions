@@ -30,7 +30,9 @@ module Language.Diorite.Region.Labels
     , atBeta
     , atEta
     -- ** ...
-    , QualDict(..)
+    , QualNat(..)
+    , remove
+    , union
     , Puts(..)
     , putCong
     , putUnique
@@ -44,7 +46,7 @@ module Language.Diorite.Region.Labels
     ) where
 
 import Language.Diorite.Signatures (Signature, Result, SigRep(..))
-import Language.Diorite.Qualifiers (Qualifier(..), type (:/~:), type (==), If, Remove, Elem, QualRep(..))
+import Language.Diorite.Qualifiers (Qualifier(..), type (:/~:), type (==), If, Remove, Union, Elem, QualRep(..))
 import Language.Diorite.Qualifiers.Witness
 import Language.Diorite.Syntax
 import Language.Diorite.Decoration ((:&:)(..))
@@ -254,16 +256,29 @@ atEta ast i p = sym :# p :$ ast
 --------------------------------------------------------------------------------
 -- ** ...
 
-type QualDict :: Qualifier (Put Nat) -> *
-data QualDict qs where
-  DictNone :: QualDict ('None)
-  DictPred :: NatRep r -> QualDict qs -> QualDict ('Put r ':. qs)
+type QualNat :: Qualifier (Put Nat) -> *
+data QualNat qs where
+  DictNone :: QualNat ('None)
+  DictPred :: NatRep r -> QualNat qs -> QualNat ('Put r ':. qs)
 
-type D = QualDict
+remove :: NatRep p -> QualNat qs -> QualNat (Remove ('Put p) qs)
+remove _ (DictNone)      = DictNone
+remove p (DictPred q qs) =
+    case testNat p q of
+        Left  Refl -> qs
+        Right Refl
+            | Refl <- putDiff p q Refl
+            -> DictPred q (remove p qs)
+
+union :: QualNat ps -> QualNat qs -> QualNat (Union ps qs)
+union (DictNone)      qs = qs
+union (DictPred p ps) qs = DictPred p (union ps (remove p qs))
+
+type D = QualNat
 
 type Puts :: Qualifier (Put Nat) -> Constraint
 class Puts qs where
-    puts :: QualDict qs
+    puts :: QualNat qs
 
 instance Puts ('None) where
     puts = DictNone
@@ -306,7 +321,7 @@ thmGTAny :: forall a b cs
     -> Greatest a cs :~: 'True
     -> Elem ('Put b) cs :~: 'True
     -> CmpNat a b :~: 'GT
-thmGTAny a b (QualPred (c :: Proxy q) (cs :: QualRep qs)) (DictPred (r :: NatRep r) ds) Refl Refl =
+thmGTAny a b (QualPred c cs) (DictPred r ds) Refl Refl =
     let bp :: Proxy ('Put b) = Proxy in
     case compareNat b r of
         Gt | Refl <- thmGTRem a r cs Refl
@@ -314,7 +329,8 @@ thmGTAny a b (QualPred (c :: Proxy q) (cs :: QualRep qs)) (DictPred (r :: NatRep
            , Refl <- putDiff b r Refl
            , Refl <- withKnownNat b $ witElemRemove bp c (QualPred c cs) Refl
            -> thmGTAny a b cs ds Refl Refl
-        Eq | Refl <- witCmpEQ b r Refl -> thmGT a r cs Refl
+        Eq | Refl <- witCmpEQ b r Refl
+           -> thmGT a r cs Refl
         Lt | Refl <- thmGTRem a r cs Refl
            , Refl <- witCmpNEQ b r Refl
            , Refl <- putDiff b r Refl
