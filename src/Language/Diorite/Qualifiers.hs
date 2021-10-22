@@ -25,6 +25,7 @@ module Language.Diorite.Qualifiers
     , (:/~:)
     , testEq
     , testElem
+    , cons
     , insert
     , remove
     , union
@@ -161,6 +162,9 @@ testElem a (QualPred b bs) = case testEq a b of
 
 --------------------------------------------------------------------------------
 -- ** ...
+
+cons :: Typeable p => Proxy p -> QualRep qs -> QualRep (p ':. qs)
+cons = QualPred
 
 insert :: Typeable p => Proxy p -> QualRep qs -> QualRep (Insert p qs)
 insert p (QualNone)      = QualPred p QualNone

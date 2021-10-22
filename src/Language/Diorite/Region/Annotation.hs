@@ -5,9 +5,9 @@
 module Language.Diorite.Region.Annotation where
 
 import Language.Diorite.Signatures (Signature(..), Result, SigRep, Sig)
-import Language.Diorite.Qualifiers (Qualifier(..), Elem, Remove, Extends, QualRep)
+import Language.Diorite.Qualifiers (Qualifier(..), Elem, Remove, Union, Extends, QualRep)
 import Language.Diorite.Syntax
-import Language.Diorite.Traversal (Arguments, Args(..), SmartApply)
+import Language.Diorite.Traversal (Arguments, Args, SmartApply)
 import Language.Diorite.Decoration ((:&:)(..))
 import Language.Diorite.Region.Labels (Put(..), Label, Strip, Dress, LblRep, Place)
 import Language.Diorite.Region.Labels.Witness (NatRep(..))
@@ -30,342 +30,410 @@ import GHC.TypeNats
 import Prelude hiding (succ)
 
 --------------------------------------------------------------------------------
--- * Annotation of ASTs with local region.
+-- * ASTs and arguments with annotations.
 --------------------------------------------------------------------------------
 
---------------------------------------------------------------------------------
--- ** Annotations for symbols, labels each application/abstraction.
+class Sym sym => Annotate sym where
+    annotate :: sym a -> () -- sym a -> label a -> ann (result a)
 
-type ABeta :: forall r . Label r * -> *
-data ABeta l where
-    ASym   :: SigRep sig -> ABeta (Dress sig)
-    --     :: sig -> Dress sig
-    AApp   :: L.Plain b ~ a => ABeta (a 'L.:-> sig) -> AEta b -> ABeta sig
-    --     :: (a :-> sig) -> (a ^ r) -> sig
-    AEApp  :: ABeta (p 'L.:=> sig) -> Ev p -> ABeta sig
-    --     :: (p :=> sig) -> p -> sig
-    AAt    :: ABeta sig -> Proxy r -> ABeta (sig 'L.:^ r)
+-- Beta w/ ex. qualifiers bound by a constraint.
+type Beta2 :: forall p . Symbol p * -> (Qualifier p -> Constraint) -> Signature p * -> *
+data Beta2 sym q sig where
+    B2 :: (q qs) => Beta sym qs sig -> QualRep qs -> Beta2 sym q sig
 
-type AEta :: forall r . Label r * -> *
-data AEta l where
-    ASpine :: LblRep sig -> AEta sig
-    --     :: ('Const a ^ r) -> ('Const a ^ r)
-    ALam   :: AEta sig -> AEta (a 'L.:-> sig)
-    --     :: a? -> sig -> ((a :-> sig) ^ r)
-    AELam  :: Ev p -> AEta sig -> AEta (p 'L.:=> sig)
-    --     :: p -> sig -> ((p :=> sig) ^ r)
--- todo: Actually lable things.
+-- Eta w/ ex. qualifiers bound by a constraint.
+type Eta2 :: forall p . Symbol p * -> (Qualifier p -> Constraint) -> Signature p * -> *
+data Eta2 sym q sig where
+    E2 :: (q qs) => Eta sym qs sig -> QualRep qs -> Eta2 sym q sig
 
-type Ann :: forall r . Signature (Put r) * -> *
-data Ann sig where
-    Ann :: ABeta ('L.Const a 'L.:^ p) -> Ann ('Const a)
+-- ...
+type L :: forall p . Signature p * -> *
+data L a = L
 
-type LEta :: forall r . (Label r * -> Constraint) -> *
-data LEta p where
-    LEta :: p l => AEta l -> LblRep l -> LEta p
+-- Args w/ ...
+type Args2 :: forall p . Symbol p * -> Arguments p -> Signature p * -> *
+data Args2 sym qs sig where
+    Nil :: Args2 sym ('T.Empty) ('Const a)
+    Arg :: Eta2 sym ((>=) ps) a -> QualRep ps -> Args2 sym qs sig -> Args2 sym ('T.Union ps qs) (a ':-> sig)
+    Rgn :: Ev p -> Args2 sym qs sig -> Args2 sym ('T.Insert p qs) (p ':=> sig)
 
---------------------------------------------------------------------------------
--- ** ASTs with "existential" but constrained qualifiers.
-
-type EBeta :: forall p
-    . Symbol p * -> (Qualifier p -> Constraint) -> (Nat -> Constraint) -> Signature p * -> *
-data EBeta sym q p sig where
-    EBeta :: (q qs, p m, L.Greatest m qs ~ 'True)
-        => Beta sym qs sig
-        -> QualRep qs
-        -> NatRep m
-        -> EBeta sym q p sig
-
-type EEta :: forall p
-    . Symbol p * -> (Qualifier p -> Constraint) -> Nat -> Signature p * -> *
-data EEta sym q n sig where
-    EEta :: (q qs, L.Greatest m qs ~ 'True, CmpNat m n ~ 'GT)
-        => Eta sym qs sig
-        -> QualRep qs
-        -> NatRep m
-        -> EEta sym q n sig
--- todo: clean up internal constraints.
-
+-- Extends as a class so it can be partially applied.
+type (>=) :: forall p . Qualifier p -> Qualifier p -> Constraint
 class    (Extends ps qs ~ 'True) => (>=) ps qs
 instance (Extends ps qs ~ 'True) => (>=) ps qs
+-- todo: Perhaps swap >= for <=, I read ((>=) qs) as "something larger than qs",
+-- but the fully applied constraint "qs >= ps". The >= symbol can then be a bit
+-- confusing as |qs| < |ps|.
 
-class    (Strip lbl ~ sig) => (~=) sig lbl
-instance (Strip lbl ~ sig) => (~=) sig lbl
-
-class    (CmpNat m n ~ 'GT) => (>) n m
-instance (CmpNat m n ~ 'GT) => (>) n m
-
---------------------------------------------------------------------------------
--- ** Region annotations.
-
-ev :: KnownNat p => NatRep p -> Place p
-ev (Nat p) = Ev (fromInteger $ toInteger p)
-
-local :: forall (sym :: Symbol (Put Nat) *) qs a (p :: Nat)
-    .  (L.Rgn :<: sym, Elem ('Put p) qs ~ 'True)
-    => NatRep p
-    -> Ann ('Const @(Put Nat) a)
-    -> Beta (sym :&: Ann) qs ('Const a)
-    -> Beta (sym :&: Ann) (Remove ('Put p) qs) ('Const a)
-local p i ast = L.withKnownNat p $ L.local (ev p) i ast
-
-atBeta :: forall (sym :: Symbol (Put Nat) *) qs a (p :: Nat)
-    .  (L.Rgn :<: sym, Remove ('Put p) qs ~ qs)
-    => Beta (sym :&: Ann) qs ('Const a)
-    -> Ann ('Const @(Put Nat) a)
-    -> NatRep p
-    -> Beta (sym :&: Ann) ('Put p ':. qs) ('Const a)
-atBeta ast i p = L.withKnownNat p $ L.atBeta ast i (ev p)
-
-atEta :: forall (sym :: Symbol (Put Nat) *) qs sig (p :: Nat)
-    .  (L.Rgn :<: sym, Remove ('Put p) qs ~ qs)
-    => Eta (sym :&: Ann) qs sig
-    -> Ann (Result sig)
-    -> NatRep p
-    -> Beta (sym :&: Ann) ('Put p ':. qs) sig
-atEta ast i p = L.withKnownNat p $ L.atEta ast i (ev p)
-
---------------------------------------------------------------------------------
--- ** Region labelling.
-
-annotateBeta :: forall (sym :: Symbol (Put Nat) *) qs ps eps rs sig l (n :: Nat) a
-    .  ( Sym sym
-       , Result sig ~ 'Const a
-       , L.Rgn :<: sym
-       -- Needed for (>= qs)
-       , SmartApply ps rs ~ qs
-       , Extends ps eps ~ 'True
-       , Strip l ~ sig
-       , Dress sig ~ l
-       -- Needed for unique n
-       , L.Greatest n qs ~ 'True
-       , L.Greatest n eps ~ 'True
-       , Remove ('Put n) eps ~ eps
-       )
-    => Beta (sym :&: Ann @Nat) eps sig
-    -> Args sym rs sig
-    -> ABeta @Nat l
-    -> SigRep sig
-    -> QualRep qs
-    -> L.QualNat qs
-    -> QualRep ps
-    -> QualRep eps
-    -> L.QualNat eps
-    -> ArgsRep rs
-    -> NatRep n
-    -> ( EBeta (sym :&: Ann @Nat) ((>=) qs) ((>) n) ('Const @(Put Nat) a)
-       , ABeta ('L.Const @Nat a)
-       )
-annotateBeta b Nil l (S.SigConst) qs qsd ps eps epsd asd n
-    | Refl <- L.withKnownNat n $ Q.witExtCons (Proxy :: Proxy ('Put n)) ps eps Refl
-    , Refl <- L.thmGTSucc n eps epsd Refl
-    , Refl <- L.witSuccGT @n
-    --
-    = let b'   = atBeta b (Ann (AAt l (Proxy :: Proxy n))) n in
-      let eps' = L.withKnownNat n $ Q.QualPred (Proxy :: Proxy ('Put n)) eps in
-      --
-      (EBeta b' eps' (L.succ n), l)
-----------------------------------------
--- Application
-annotateBeta b ((e :: Eta sym xs x) :* (as :: Args sym ys y)) l (S.SigPart a sig) qs qsd ps eps epsd (ArgsUnion xs ysd) n
-    | Refl :: Strip l :~: (x ':-> y) <- Refl
-    , Refl :: l       :~: (Dress x 'L.:-> Dress y) <- Refl
-    -- Convincing Haskell I'm right:
-    , Refl :: qs :~: SmartApply ps ('T.Union xs ys) <- Refl
-    , Refl :: qs :~: SmartApply (Q.Union ps xs) ys <- Refl
-    -- SmartApply (ps + xs) ys => Extends xs (SmartApply (ps + xs) ys) ~ Extends xs qs
-    , Refl :: Extends xs qs :~: 'True
-        <- witExtUnion xs ps ysd
-    -- Extends xs qs, n >> qs => n >> xs
-    , Refl :: L.Greatest n xs :~: 'True
-        <- witExtGT n qs qsd xs (undefined :: L.QualNat xs) Refl Refl
-    --
-    = case annotateEta e a n of
-        (EEta (e' :: Eta (sym :&: Ann) exs x) exs (m :: NatRep m), LEta (l' :: AEta lx) lr, qs')
-          | Refl :: Strip lx :~: x <- Refl
-          , Refl :: Extends (Q.Union ps xs) (Q.Union eps exs) :~: 'True
-              <- Q.witEUBoth ps eps xs exs Refl Refl
-          , Refl :: L.Plain lx :~: Dress x
-              <- L.witSPlain lr a Refl
-          -- m > n
-          , Refl :: CmpNat m n :~: 'GT
-              <- undefined
-          -- m > n, n >> eps => m >> eps
-          , Refl :: L.Greatest m eps :~: 'True
-              <- witGtAny m n eps epsd Refl Refl
-          -- m >> exs, m >> eps => m >> (exs + eps)
-          , Refl :: L.Greatest m (Q.Union eps exs) :~: 'True
-              <- undefined
-          , Refl :: Remove ('Put m) (Q.Union eps exs) :~: Q.Union eps exs
-              <- undefined
-          , Refl :: L.Greatest m qs :~: 'True
-              <- undefined
-          --
-          -> let b'    = b :$ e' in
-             let ps'   = Q.union ps xs in
-             let eps'  = Q.union eps exs in
-             let epsd' = L.union epsd (undefined :: L.QualNat exs) in
-             let l''   = AApp l l' in
-             annotateBeta
-                 b' as l'' sig
-                 qs qsd
-                 ps'
-                 eps' epsd'
-                 ysd
-                 m
-----------------------------------------
--- Evidence application
-annotateBeta b ((p@(Ev _) :: Ev p) :~ (as :: Args sym ys y)) l (S.SigPred pp sig) qs qsd ps eps epsd (ArgsInsert (x :: NatRep x) asd) n
-    | Refl :: rs :~: 'T.Insert p ys <- Refl
-    , Refl :: 'Put x :~: p <- Refl
-    , Dict :: Dict (Typeable ('Put n)) <- L.withKnownNat n Dict
-    -- Convincing Haskell I'm right:
-    -- SmartApply ps (r : rs) ~ SmartApply (r : ps) rs
-    , Refl :: qs :~: SmartApply ps ('T.Insert p ys) <- Refl
-    , Refl :: qs :~: SmartApply (p ':. ps) ys <- Refl
-    -- n >> qs, n >> eps
-    --   (>>  = greatest = greater-than-any-in-qualifiers)
-    --   (eps = extended-ps ~ ps + ?)
-    , Refl :: L.Greatest n qs :~: 'True <- Refl
-    , Refl :: L.Greatest n eps :~: 'True <- Refl
-    -- SmartApply (r : ps) rs => Elem r (SmartApply (r : ps) rs) ~ Elem r qs ~ True
-    , Refl :: Elem p qs :~: 'True
-        <- witElemInsert (Proxy :: Proxy p) asd ps
-    -- Elem r qs, n >> qs => n > r
-    , Refl :: CmpNat n x :~: 'GT
-        <- L.thmGTAny n x qs qsd
-             (Refl :: L.Greatest n qs :~: 'True)
-             (Refl :: Elem p qs :~: 'True)
-    -- n >> eps, n > r => n >> (r : eps)
-    , Refl :: L.Greatest n (p ':. eps) :~: 'True <- Refl
-    -- n >> (r : eps) => Elem n (r : eps) ~ False
-    , Refl :: Elem ('Put n) (p ':. eps) :~: 'False
-        <- L.thmGTUnique n (Q.QualPred pp eps) (L.DictPred x epsd)
-             (Refl :: L.Greatest n (p ':. eps) :~: 'True)
-    -- Elem n (r : eps) ~ False => Remove n (r : eps) ~ (r : eps)
-    , Refl :: Remove ('Put n) (p ':. eps) :~: (p ':. eps)
-        <- Q.witElemId (Proxy :: Proxy ('Put n)) (Q.QualPred pp eps)
-             (Refl :: Elem ('Put n) (p ':. eps) :~: 'False)
-    --
-    = let b'    = b :# p in
-      let ps'   = Q.QualPred pp ps in
-      let eps'  = Q.QualPred pp eps in
-      let epsd' = L.DictPred x epsd in
-      let l'    = AEApp l p in
-      --
-      annotateBeta b' as l' sig qs qsd ps' eps' epsd' asd n
-
-annotateEta :: forall (sym :: Symbol (Put Nat) *) qs (n :: Nat) sig
-    .  ( Sym sym
-       , L.Rgn :<: sym
-       --
-       , L.Greatest n qs ~ 'True
-       )
+annotateEta :: forall (sym :: Symbol (Put Nat) *) qs sig
+    .  (Sym sym, L.Rgn :<: sym)
     => Eta sym qs sig
+    -> Eta2 sym ((>=) qs) sig
+annotateEta (Spine b)
+    | B2 b' qs' <- annotateASTF b (undefined :: QualRep qs)
+    = E2 (Spine b') qs'
+annotateEta (v :\ e)
+    | E2 e' qs' <- annotateEta e
+    = E2 (v :\ e') qs'
+annotateEta ((Ev p :: Ev p) :\\ (e :: Eta sym ps b))
+    | E2 (e' :: Eta sym ps' b) (ps' :: QualRep ps') <- annotateEta e
+    -- By :\\ and E2, know that "p in ps", "qs ~ ps - p" and "ps' >= ps"
+    -- 1: "p in ps'" from "p :\\ e'".
+    --   As "ps' >= ps" and "p in ps", then "p in ps'".
+    , Refl :: Elem p ps' :~: 'True
+        <- Q.witExtIn (Proxy @p) (undefined :: QualRep ps) ps' Refl Refl
+    -- 2: "(ps' - p) >= qs" from "E2 _ (ps' - p)"
+    --   As "qs ~ ps - p", then "(ps' - p) >= qs ~ (ps' - p) >= (ps - p)"
+    --   Know that (ps' - p) >= (ps - p) is eq. to ps' >= ps
+    , Refl :: Extends (Remove p ps) (Remove p ps') :~: Extends ps ps'
+        <- Q.witExtShrink (Proxy @p) (undefined :: QualRep ps) ps' Refl
+    --
+    = E2 (Ev p :\\ e') (Q.remove (Proxy @p) ps')
+
+annotateBeta ::  forall (sym :: Symbol (Put Nat) *) ps ps' rs qs sig a
+    .  ( Sym sym, L.Rgn :<: sym, 'Const a ~ Result sig
+       , SmartApply ps rs ~ qs, Extends ps ps' ~ 'True)
+    => Beta (sym :&: L) ps' sig
+    -> Args2 (sym :&: L) rs sig
+    -> QualRep ps
     -> SigRep sig
-    -> NatRep n
-    -> ( EEta (sym :&: Ann @Nat) ((>=) qs) n sig
-       , LEta @Nat ((~=) sig)
-       , QualRep qs
-       )
-annotateEta (Spine b) (S.SigConst) n
-    = case annotateASTF n (undefined :: QualRep qs) (undefined :: L.QualNat qs) b of
-          (EBeta (b' :: Beta (sym :&: Ann @r) eqs ('Const a)) eqs (m :: NatRep m), (lr :: LblRep ('L.Const a)))
-              | Refl :: CmpNat m n :~: 'GT <- undefined
-              --
-              -> let e  = Spine b' in
-                 let sr = S.SigConst :: SigRep ('Const a) in
-                 let l' = ASpine lr in
-                 --
-                 (EEta e eqs m, LEta l' lr, (undefined :: QualRep qs))
-----------------------------------------
--- Variable abstraction
-annotateEta (v :\ e) (S.SigPart b sig) n
-    | Refl :: sig :~: (b ':-> a) <- Refl
+    -> Beta2 (sym :&: L) ((>=) qs) ('Const a)
+annotateBeta b Nil ps (S.SigConst)
+    = B2 b (undefined :: QualRep ps')
+annotateBeta b (Arg (E2 e (l' :: QualRep l')) (l :: QualRep l) as) ps (S.SigPart _ sig)
+    -- rs ~ 'T.Union l r
+    -- qs ~ SmartApply (Union ps l) r
+    | Refl :: Extends (Union ps l) (Union ps' l') :~: 'True
+        <- Q.witEUBoth ps (undefined :: QualRep ps') l l' Refl Refl
     --
-    = case annotateEta e sig n of
-          (EEta (e' :: Eta (sym :&: Ann @r) eqs a) eqs m, LEta (l :: AEta l) lr, qs)
-              | Refl :: Strip (Dress b) :~: b <- L.witSDIso b
-              --
-              -> let e'' = v :\ e' :: Eta (sym :&: Ann @r) eqs (b ':-> a) in
-                 let l'  = ALam l  :: AEta (Dress b 'L.:-> l) in
-                 let lr' = L.LblPart (L.dress b) lr in
-                 --
-                 (EEta e'' eqs m, LEta l' lr', qs)
-----------------------------------------
--- Evidence abstraction
-annotateEta (p@(Ev _ :: Ev p) :\\ (e :: Eta sym xs x)) (S.SigPred _ sig) n
-    | Refl :: L.Greatest n xs :~: 'True <- undefined
-    --
-    = case annotateEta e sig n of
-          (EEta (e' :: Eta (sym :&: Ann @r) eqs a) eqs (m :: NatRep m), LEta (l :: AEta l) lr, qs)
-              | Refl <- Q.witExtIn (Proxy :: Proxy p) qs eqs Refl Refl
-              , Refl <- Q.witExtShrink (Proxy :: Proxy p) qs eqs Refl
-              --
-              , Refl :: L.Greatest m (Remove p eqs) :~: 'True <- undefined
-              --
-              -> let e''  = p :\\ e' :: Eta (sym :&: Ann @r) (Q.Remove p eqs) (p ':=> a) in
-                 let pp   = Proxy :: Proxy p in
-                 let qs'  = Q.remove pp qs in
-                 let eqs' = Q.remove pp eqs in
-                 let l'   = AELam p l in
-                 let lr'  = L.LblPred pp lr in
-                 --
-                 (EEta e'' eqs' m, LEta l' lr', qs')
+    = annotateBeta (b :$ e) as (Q.union ps l) sig
+annotateBeta b (Rgn ev as) ps (S.SigPred evp sig)
+    -- rs ~ 'T.Insert p r
+    -- qs ~ SmartApply (p ':. ps) r
+    = annotateBeta (b :# ev) as (Q.cons evp ps) sig
 
---------------------------------------------------------------------------------
+annotateArgs :: forall (sym :: Symbol (Put Nat) *) rs sig
+    .  (Sym sym, L.Rgn :<: sym)
+    => Args sym rs sig
+    -> Args2 sym rs sig
+annotateArgs (T.Nil) = Nil
+annotateArgs (e T.:* as) = undefined -- annotateEta e :* annotateArgs as
+annotateArgs (p T.:~ as) = undefined -- .. p :~ annotateArgs as
 
--- | ...
-annotateSym :: forall (sym :: Symbol (Put Nat) *) sig qs rs a (n :: Nat)
-    .  ( Sym sym
-       , Result sig ~ 'Const a
-       , SmartApply 'None rs ~ qs
-       , L.Rgn :<: sym
-       , L.Greatest n qs ~ 'True
-       )
-    => NatRep n
-    -> QualRep qs
-    -> L.QualNat qs
-    -> sym sig
+annotateSym :: forall (sym :: Symbol (Put Nat) *) qs rs a sig
+    .  (Sym sym, L.Rgn :<: sym, SmartApply 'None rs ~ qs, Result sig ~ 'Const a)
+    => sym sig
     -> Args sym rs sig
-    -> ( EBeta (sym :&: Ann @Nat) ((>=) qs) ((>) n) ('Const @(Put Nat) a)
-       , LblRep ('L.Const @Nat a)
-       )
-annotateSym n qs qsd sym as =
-    let none = Q.QualNone in
-    let sig  = symbol sym in
-    --
-    L.witSDIso sig |-
-    S.witTypeable (S.result sig) |-
-    --
-    let (b, l) =
-          let a = Ann (AAt l Proxy) in
-          annotateBeta (Sym (sym :&: a)) as (ASym sig) sig qs qsd none none L.DictNone undefined n
-    in
-    (b, L.LblConst @a)    
+    -> Beta2 sym ((>=) qs) ('Const a)
+annotateSym = undefined -- annotateArgs as
 
-
-annotateASTF :: forall (sym :: Symbol (Put Nat) *) (n :: Nat) qs a
-    .  ( Sym sym
-       , L.Rgn :<: sym
-       , L.Greatest n qs ~ 'True
-       )
-    => NatRep n
+annotateASTF :: forall (sym :: Symbol (Put Nat) *) qs a
+    .  (Sym sym, L.Rgn :<: sym)
+    => ASTF sym qs a
     -> QualRep qs
-    -> L.QualNat qs
-    -> ASTF sym qs a
-    -> ( EBeta (sym :&: Ann @Nat) ((>=) qs) ((>) n) ('Const @(Put Nat) a)
-       , LblRep ('L.Const @Nat a)
-       )
-annotateASTF n qs qsd = T.constMatch (annotateSym n qs qsd) undefined
+    -> Beta2 sym ((>=) qs) ('Const a)
+annotateASTF ast _ = T.constMatch annotateSym undefined ast
 
 -- annotate :: forall (sym :: Symbol (Put Nat) *) qs a
+--     .  (Sym sym, L.Rgn :<: sym)
+--     => ASTF sym qs a
+--     -> Beta2 (sym :&: Ann) ((>=) qs) ('Const a)
+-- annotate ast = undefined -- annotateASTF ...
+
+--------------------------------------------------------------------------------
+-- ...
+--------------------------------------------------------------------------------
+
+-- type ABeta :: forall r . Label r * -> *
+-- data ABeta l where
+--     ASym   :: SigRep sig -> ABeta (Dress sig)
+--     --     :: sig -> Dress sig
+--     AApp   :: L.Plain b ~ a => ABeta (a 'L.:-> sig) -> AEta b -> ABeta sig
+--     --     :: (a :-> sig) -> (a ^ r) -> sig
+--     AEApp  :: ABeta (p 'L.:=> sig) -> Ev p -> ABeta sig
+--     --     :: (p :=> sig) -> p -> sig
+--     AAt    :: ABeta sig -> Proxy r -> ABeta (sig 'L.:^ r)
+
+-- type AEta :: forall r . Label r * -> *
+-- data AEta l where
+--     ASpine :: LblRep sig -> AEta sig
+--     --     :: ('Const a ^ r) -> ('Const a ^ r)
+--     ALam   :: AEta sig -> AEta (a 'L.:-> sig)
+--     --     :: a? -> sig -> ((a :-> sig) ^ r)
+--     AELam  :: Ev p -> AEta sig -> AEta (p 'L.:=> sig)
+--     --     :: p -> sig -> ((p :=> sig) ^ r)
+-- -- todo: Actually annotate things.
+
+-- type Ann :: forall r . Signature (Put r) * -> *
+-- data Ann sig where
+--     Ann :: ABeta ('L.Const a 'L.:^ p) -> Ann ('Const a)
+
+-- type LEta :: forall r . (Label r * -> Constraint) -> *
+-- data LEta p where
+--     LEta :: p l => AEta l -> LblRep l -> LEta p
+
+-- ev :: KnownNat p => NatRep p -> Place p
+-- ev (Nat p) = Ev (fromInteger $ toInteger p)
+
+-- local :: forall (sym :: Symbol (Put Nat) *) qs a (p :: Nat)
+--     .  (L.Rgn :<: sym, Elem ('Put p) qs ~ 'True)
+--     => NatRep p
+--     -> Ann ('Const @(Put Nat) a)
+--     -> Beta (sym :&: Ann) qs ('Const a)
+--     -> Beta (sym :&: Ann) (Remove ('Put p) qs) ('Const a)
+-- local p i ast = L.withKnownNat p $ L.local (ev p) i ast
+
+-- atBeta :: forall (sym :: Symbol (Put Nat) *) qs a (p :: Nat)
+--     .  (L.Rgn :<: sym, Remove ('Put p) qs ~ qs)
+--     => Beta (sym :&: Ann) qs ('Const a)
+--     -> Ann ('Const @(Put Nat) a)
+--     -> NatRep p
+--     -> Beta (sym :&: Ann) ('Put p ':. qs) ('Const a)
+-- atBeta ast i p = L.withKnownNat p $ L.atBeta ast i (ev p)
+
+-- atEta :: forall (sym :: Symbol (Put Nat) *) qs sig (p :: Nat)
+--     .  (L.Rgn :<: sym, Remove ('Put p) qs ~ qs)
+--     => Eta (sym :&: Ann) qs sig
+--     -> Ann (Result sig)
+--     -> NatRep p
+--     -> Beta (sym :&: Ann) ('Put p ':. qs) sig
+-- atEta ast i p = L.withKnownNat p $ L.atEta ast i (ev p)
+
+-- class    (Extends ps qs ~ 'True) => (>=) ps qs
+-- instance (Extends ps qs ~ 'True) => (>=) ps qs
+
+-- class    (Strip lbl ~ sig) => (~=) sig lbl
+-- instance (Strip lbl ~ sig) => (~=) sig lbl
+
+-- class    (CmpNat m n ~ 'GT) => (>>) n m
+-- instance (CmpNat m n ~ 'GT) => (>>) n m
+
+-- annotateBeta :: forall (sym :: Symbol (Put Nat) *) qs ps eps rs sig l (n :: Nat) a
+--     .  ( Sym sym
+--        , Result sig ~ 'Const a
+--        , L.Rgn :<: sym
+--        -- Needed for (>= qs)
+--        , SmartApply ps rs ~ qs
+--        , Extends ps eps ~ 'True
+--        , Strip l ~ sig
+--        , Dress sig ~ l
+--        -- Needed for unique n
+--        , L.Greatest n qs ~ 'True
+--        , L.Greatest n eps ~ 'True
+--        , Remove ('Put n) eps ~ eps
+--        )
+--     => Beta (sym :&: Ann @Nat) eps sig
+--     -> Args sym rs sig
+--     -> ABeta @Nat l
+--     -> SigRep sig
+--     -> QualRep qs
+--     -> L.QualNat qs
+--     -> QualRep ps
+--     -> QualRep eps
+--     -> L.QualNat eps
+--     -> ArgsRep rs
+--     -> NatRep n
+--     -> ( EBeta (sym :&: Ann @Nat) ((>=) qs) ((>) n) ('Const @(Put Nat) a)
+--        , ABeta ('L.Const @Nat a)
+--        )
+-- annotateBeta b Nil l (S.SigConst) qs qsd ps eps epsd asd n
+--     | Refl <- L.withKnownNat n $ Q.witExtCons (Proxy :: Proxy ('Put n)) ps eps Refl
+--     , Refl <- L.thmGTSucc n eps epsd Refl
+--     , Refl <- L.witSuccGT @n
+--     --
+--     = let b'   = atBeta b (Ann (AAt l (Proxy :: Proxy n))) n in
+--       let eps' = L.withKnownNat n $ Q.QualPred (Proxy :: Proxy ('Put n)) eps in
+--       --
+--       (EBeta b' eps' (L.succ n), l)
+-- ----------------------------------------
+-- -- Application
+-- annotateBeta b ((e :: Eta sym xs x) :* (as :: Args sym ys y)) l (S.SigPart a sig) qs qsd ps eps epsd (ArgsUnion xs ysd) n
+--     | Refl :: Strip l :~: (x ':-> y) <- Refl
+--     , Refl :: l       :~: (Dress x 'L.:-> Dress y) <- Refl
+--     -- Convincing Haskell I'm right:
+--     , Refl :: qs :~: SmartApply ps ('T.Union xs ys) <- Refl
+--     , Refl :: qs :~: SmartApply (Q.Union ps xs) ys <- Refl
+--     -- SmartApply (ps + xs) ys => Extends xs (SmartApply (ps + xs) ys) ~ Extends xs qs
+--     , Refl :: Extends xs qs :~: 'True
+--         <- witExtUnion xs ps ysd
+--     -- Extends xs qs, n >> qs => n >> xs
+--     , Refl :: L.Greatest n xs :~: 'True
+--         <- witExtGT n qs qsd xs (undefined :: L.QualNat xs) Refl Refl
+--     --
+--     = case annotateEta e a n of
+--         (EEta (e' :: Eta (sym :&: Ann) exs x) exs (m :: NatRep m), LEta (l' :: AEta lx) lr, qs')
+--           | Refl :: Strip lx :~: x <- Refl
+--           , Refl :: Extends (Q.Union ps xs) (Q.Union eps exs) :~: 'True
+--               <- Q.witEUBoth ps eps xs exs Refl Refl
+--           , Refl :: L.Plain lx :~: Dress x
+--               <- L.witSPlain lr a Refl
+--           -- m > n
+--           , Refl :: CmpNat m n :~: 'GT
+--               <- undefined
+--           -- m > n, n >> eps => m >> eps
+--           , Refl :: L.Greatest m eps :~: 'True
+--               <- witGtAny m n eps epsd Refl Refl
+--           -- m >> exs, m >> eps => m >> (exs + eps)
+--           , Refl :: L.Greatest m (Q.Union eps exs) :~: 'True
+--               <- undefined
+--           , Refl :: Remove ('Put m) (Q.Union eps exs) :~: Q.Union eps exs
+--               <- undefined
+--           , Refl :: L.Greatest m qs :~: 'True
+--               <- undefined
+--           --
+--           -> let b'    = b :$ e' in
+--              let ps'   = Q.union ps xs in
+--              let eps'  = Q.union eps exs in
+--              let epsd' = L.union epsd (undefined :: L.QualNat exs) in
+--              let l''   = AApp l l' in
+--              annotateBeta
+--                  b' as l'' sig
+--                  qs qsd
+--                  ps'
+--                  eps' epsd'
+--                  ysd
+--                  m
+-- ----------------------------------------
+-- -- Evidence application
+-- annotateBeta b ((p@(Ev _) :: Ev p) :~ (as :: Args sym ys y)) l (S.SigPred pp sig) qs qsd ps eps epsd (ArgsInsert (x :: NatRep x) asd) n
+--     | Refl :: rs :~: 'T.Insert p ys <- Refl
+--     , Refl :: 'Put x :~: p <- Refl
+--     , Dict :: Dict (Typeable ('Put n)) <- L.withKnownNat n Dict
+--     -- Convincing Haskell I'm right:
+--     -- SmartApply ps (r : rs) ~ SmartApply (r : ps) rs
+--     , Refl :: qs :~: SmartApply ps ('T.Insert p ys) <- Refl
+--     , Refl :: qs :~: SmartApply (p ':. ps) ys <- Refl
+--     -- n >> qs, n >> eps
+--     --   (>>  = greatest = greater-than-any-in-qualifiers)
+--     --   (eps = extended-ps ~ ps + ?)
+--     , Refl :: L.Greatest n qs :~: 'True <- Refl
+--     , Refl :: L.Greatest n eps :~: 'True <- Refl
+--     -- SmartApply (r : ps) rs => Elem r (SmartApply (r : ps) rs) ~ Elem r qs ~ True
+--     , Refl :: Elem p qs :~: 'True
+--         <- witElemInsert (Proxy :: Proxy p) asd ps
+--     -- Elem r qs, n >> qs => n > r
+--     , Refl :: CmpNat n x :~: 'GT
+--         <- L.thmGTAny n x qs qsd
+--              (Refl :: L.Greatest n qs :~: 'True)
+--              (Refl :: Elem p qs :~: 'True)
+--     -- n >> eps, n > r => n >> (r : eps)
+--     , Refl :: L.Greatest n (p ':. eps) :~: 'True <- Refl
+--     -- n >> (r : eps) => Elem n (r : eps) ~ False
+--     , Refl :: Elem ('Put n) (p ':. eps) :~: 'False
+--         <- L.thmGTUnique n (Q.QualPred pp eps) (L.DictPred x epsd)
+--              (Refl :: L.Greatest n (p ':. eps) :~: 'True)
+--     -- Elem n (r : eps) ~ False => Remove n (r : eps) ~ (r : eps)
+--     , Refl :: Remove ('Put n) (p ':. eps) :~: (p ':. eps)
+--         <- Q.witElemId (Proxy :: Proxy ('Put n)) (Q.QualPred pp eps)
+--              (Refl :: Elem ('Put n) (p ':. eps) :~: 'False)
+--     --
+--     = let b'    = b :# p in
+--       let ps'   = Q.QualPred pp ps in
+--       let eps'  = Q.QualPred pp eps in
+--       let epsd' = L.DictPred x epsd in
+--       let l'    = AEApp l p in
+--       --
+--       annotateBeta b' as l' sig qs qsd ps' eps' epsd' asd n
+
+-- annotateEta :: forall (sym :: Symbol (Put Nat) *) qs (n :: Nat) sig
 --     .  ( Sym sym
 --        , L.Rgn :<: sym
+--        --
+--        , L.Greatest n qs ~ 'True
 --        )
---     => ASTF sym qs a
---     -> EBeta (sym :&: Ann) ((>=) qs) ((>) 0) ('Const a)
--- annotate ast = undefined -- fst (annotateASTF ast zero)
+--     => Eta sym qs sig
+--     -> SigRep sig
+--     -> NatRep n
+--     -> ( EEta (sym :&: Ann @Nat) ((>=) qs) n sig
+--        , LEta @Nat ((~=) sig)
+--        , QualRep qs
+--        )
+-- annotateEta (Spine b) (S.SigConst) n
+--     = case annotateASTF n (undefined :: QualRep qs) (undefined :: L.QualNat qs) b of
+--           (EBeta (b' :: Beta (sym :&: Ann @r) eqs ('Const a)) eqs (m :: NatRep m), (lr :: LblRep ('L.Const a)))
+--               | Refl :: CmpNat m n :~: 'GT <- undefined
+--               --
+--               -> let e  = Spine b' in
+--                  let sr = S.SigConst :: SigRep ('Const a) in
+--                  let l' = ASpine lr in
+--                  --
+--                  (EEta e eqs m, LEta l' lr, (undefined :: QualRep qs))
+-- ----------------------------------------
+-- -- Variable abstraction
+-- annotateEta (v :\ e) (S.SigPart b sig) n
+--     | Refl :: sig :~: (b ':-> a) <- Refl
+--     --
+--     = case annotateEta e sig n of
+--           (EEta (e' :: Eta (sym :&: Ann @r) eqs a) eqs m, LEta (l :: AEta l) lr, qs)
+--               | Refl :: Strip (Dress b) :~: b <- L.witSDIso b
+--               --
+--               -> let e'' = v :\ e' :: Eta (sym :&: Ann @r) eqs (b ':-> a) in
+--                  let l'  = ALam l  :: AEta (Dress b 'L.:-> l) in
+--                  let lr' = L.LblPart (L.dress b) lr in
+--                  --
+--                  (EEta e'' eqs m, LEta l' lr', qs)
+-- ----------------------------------------
+-- -- Evidence abstraction
+-- annotateEta (p@(Ev _ :: Ev p) :\\ (e :: Eta sym xs x)) (S.SigPred _ sig) n
+--     | Refl :: L.Greatest n xs :~: 'True <- undefined
+--     --
+--     = case annotateEta e sig n of
+--           (EEta (e' :: Eta (sym :&: Ann @r) eqs a) eqs (m :: NatRep m), LEta (l :: AEta l) lr, qs)
+--               | Refl <- Q.witExtIn (Proxy :: Proxy p) qs eqs Refl Refl
+--               , Refl <- Q.witExtShrink (Proxy :: Proxy p) qs eqs Refl
+--               --
+--               , Refl :: L.Greatest m (Remove p eqs) :~: 'True <- undefined
+--               --
+--               -> let e''  = p :\\ e' :: Eta (sym :&: Ann @r) (Q.Remove p eqs) (p ':=> a) in
+--                  let pp   = Proxy :: Proxy p in
+--                  let qs'  = Q.remove pp qs in
+--                  let eqs' = Q.remove pp eqs in
+--                  let l'   = AELam p l in
+--                  let lr'  = L.LblPred pp lr in
+--                  --
+--                  (EEta e'' eqs' m, LEta l' lr', qs')
+
+-- annotateSym :: forall (sym :: Symbol (Put Nat) *) sig qs rs a (n :: Nat)
+--     .  ( Sym sym
+--        , Result sig ~ 'Const a
+--        , SmartApply 'None rs ~ qs
+--        , L.Rgn :<: sym
+--        , L.Greatest n qs ~ 'True
+--        )
+--     => NatRep n
+--     -> QualRep qs
+--     -> L.QualNat qs
+--     -> sym sig
+--     -> Args sym rs sig
+--     -> ( EBeta (sym :&: Ann @Nat) ((>=) qs) ((>) n) ('Const @(Put Nat) a)
+--        , LblRep ('L.Const @Nat a)
+--        )
+-- annotateSym n qs qsd sym as =
+--     let none = Q.QualNone in
+--     let sig  = symbol sym in
+--     --
+--     L.witSDIso sig |-
+--     S.witTypeable (S.result sig) |-
+--     --
+--     let (b, l) =
+--           let a = Ann (AAt l Proxy) in
+--           annotateBeta (Sym (sym :&: a)) as (ASym sig) sig qs qsd none none L.DictNone undefined n
+--     in
+--     (b, L.LblConst @a)    
+
+-- annotateASTF :: forall (sym :: Symbol (Put Nat) *) (n :: Nat) qs a
+--     .  ( Sym sym
+--        , L.Rgn :<: sym
+--        , L.Greatest n qs ~ 'True
+--        )
+--     => NatRep n
+--     -> QualRep qs
+--     -> L.QualNat qs
+--     -> ASTF sym qs a
+--     -> ( EBeta (sym :&: Ann @Nat) ((>=) qs) ((>) n) ('Const @(Put Nat) a)
+--        , LblRep ('L.Const @Nat a)
+--        )
+-- annotateASTF n qs qsd = T.constMatch (annotateSym n qs qsd) undefined
 
 --------------------------------------------------------------------------------
 -- * ...
@@ -376,10 +444,6 @@ data ArgsRep qs where
     ArgsEmpty  :: ArgsRep ('T.Empty)
     ArgsUnion  :: QualRep qs -> ArgsRep ps -> ArgsRep ('T.Union qs ps)
     ArgsInsert :: NatRep n -> ArgsRep qs -> ArgsRep ('T.Insert ('Put n) qs)
-
-type Arguments :: T.Arguments (Put Nat) -> Constraint
-class Arguments qs where
-    record :: ArgsRep qs
     
 --------------------------------------------------------------------------------
 -- ** ...

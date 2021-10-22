@@ -148,6 +148,7 @@ elam f = Ev v :\\ body
   where
     v    = maxEvEta body + 1
     body = f $ Ev v
+-- todo: Loosen qual. constraints, "q:qs" => "Elem q qs".
 
 --------------------------------------------------------------------------------
 -- * "Smart" constructors.

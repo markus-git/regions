@@ -8,7 +8,6 @@ module Language.Diorite.Signatures
       Signature(..)
     , Result
     , Erasure
-    , Predicate
     , SigRep(..)
     , Sig(..)
     -- ** ...
@@ -51,11 +50,6 @@ type family Erasure sig  where
     Erasure ('Const a) = 'Const a
     Erasure (a ':-> b) = Erasure a ':-> Erasure b
     Erasure (_ ':=> a) = Erasure a
-
--- | ...
-type Predicate :: forall p . Signature p * -> *
-type family Predicate sig where
-    Predicate (_ :: Signature p *) = p
 
 --------------------------------------------------------------------------------
 -- ** Rep. of a valid signature.

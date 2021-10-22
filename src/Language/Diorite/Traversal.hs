@@ -20,7 +20,7 @@ import Language.Diorite.Syntax (Name, Ev, Symbol, Beta(..), Eta(..), ASTF)
 import qualified Control.Applicative as A
 
 --------------------------------------------------------------------------------
--- * Traversal.
+-- * Arguments.
 --------------------------------------------------------------------------------
 
 -- | ...
@@ -40,9 +40,6 @@ data Args sym qs sig where
 
 infixr :*, :~
 
---------------------------------------------------------------------------------
--- ** ...
-  
 -- | ...
 type SmartApply :: forall p . Qualifier p -> Arguments p -> Qualifier p
 type family SmartApply qs ex where
@@ -51,13 +48,9 @@ type family SmartApply qs ex where
     SmartApply qs ('Insert p ps) = SmartApply (p ':. qs) ps
 
 --------------------------------------------------------------------------------
--- ** ...
-
--- ...
-
+-- * Traversals via pattern matching.
 --------------------------------------------------------------------------------
--- ** Traversals via pattern matching.
-    
+
 -- | \"Pattern match\" on a fully applied 'AST' using:
 --   1. a \"symbol\" function that gets direct access to the top-most symbol and
 --      its sub-trees given as 'Args'.
@@ -87,8 +80,6 @@ match matchSym matchVar = flip matchBeta Nil
     matchBeta (Sym s)  as = matchSym s as
     matchBeta (b :$ e) as = matchBeta b (e :* as)
     matchBeta (b :# q) as = matchBeta b (q :~ as)
-
---------------------------------------------------------------------------------
 
 -- | A version of 'match' with a simpler, constant result type.
 constMatch :: forall sym qs a b
