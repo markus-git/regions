@@ -85,7 +85,7 @@ data Beta sym qs sig where
 type Eta :: forall p . Symbol p * -> Qualifier p -> Signature p * -> *
 data Eta sym qs sig where
     -- ^ Body.
-    Spine :: Beta sym qs ('Const a) -> Eta sym qs ('Const a)
+    Spine :: Qual qs => Beta sym qs ('Const a) -> Eta sym qs ('Const a)
     -- ^ Abstraction.
     (:\)  :: Sig a => Name -> Eta sym qs sig -> Eta sym qs (a ':-> sig)
     -- ^ Evidence-abstraction.
@@ -259,7 +259,9 @@ smartSym' sym = smartBeta (record :: ExRep es) (signature :: SigRep sig) (Sym sy
         .  ExRep e -> QualRep q -> SigRep a -> SmartBeta sym q e a
         -> Eta sym (Union q (SmartQual e)) a
     smartEta (ExEmpty) q (SigConst) f =
-        witUniIdent q |- Spine f
+        witQual q |-
+        witUniIdent q |-
+        Spine f
     smartEta (ExUnion x y) q (SigPart a b) f =
         witSig a |-
         witUniAssoc q fx fy |-

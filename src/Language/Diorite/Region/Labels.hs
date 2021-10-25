@@ -46,7 +46,7 @@ module Language.Diorite.Region.Labels
     ) where
 
 import Language.Diorite.Signatures (Signature, Result, SigRep(..))
-import Language.Diorite.Qualifiers (Qualifier(..), type (:/~:), type (==), If, Remove, Union, Elem, QualRep(..))
+import Language.Diorite.Qualifiers (Qualifier(..), type (:/~:), type (==), If, Remove, Union, Elem, QualRep(..), Qual)
 import Language.Diorite.Qualifiers.Witness
 import Language.Diorite.Syntax
 import Language.Diorite.Decoration ((:&:)(..))
@@ -215,7 +215,7 @@ data Rgn sig where
 
 -- | Introduce a local binding for place 'p', associated with region 'r'.
 local :: forall r (sym :: Symbol (Put r) *) qs (p :: r) (info :: Signature (Put r) * -> *) a
-    .  (Rgn :<: sym, Elem ('Put p) qs ~ 'True, Typeable p, Typeable r)
+    .  (Rgn :<: sym, Qual qs, Elem ('Put p) qs ~ 'True, Typeable p, Typeable r)
     => Place p
     -> info ('S.Const a)
     -> ASTF (sym :&: info) qs a
@@ -230,7 +230,7 @@ local p i ast = sym :$ (p :\\ Spine ast)
 
 -- | Annotate a value-expression with the place to store its result in.
 atBeta :: forall r (sym :: Symbol (Put r) *) qs (info :: Signature (Put r) * -> *) (p :: r) a
-    .  (Rgn :<: sym, Remove ('Put p) qs ~ qs)
+    .  (Rgn :<: sym, Qual qs, Remove ('Put p) qs ~ qs)
     => ASTF (sym :&: info) qs a
     -> info ('S.Const a)
     -> Place p

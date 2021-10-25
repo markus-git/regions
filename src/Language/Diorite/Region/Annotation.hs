@@ -96,32 +96,32 @@ annotateBeta (B2 b ps') (Rgn ev as) ps (S.SigPred evp sig)
 annotateEta :: forall (sym :: Symbol (Put Nat) *) qs sig
     .  (Sym sym, Annotate sym, L.Rgn :<: sym)
     => Eta sym qs sig
-    -> Eta2 (sym :&: L) ((>=) qs) sig
+    -> (Eta2 (sym :&: L) ((>=) qs) sig, QualRep qs)
 annotateEta (Spine b)
-    | B2 b' qs' <- annotateASTF b (undefined :: QualRep qs)
-    = E2 (Spine b') qs'
+    | qs :: QualRep qs <- Q.qualifier
+    , B2 b' qs' <- annotateASTF b -- (qs :: QualRep qs)
+    , Dict <- Q.witQual qs'
+    = (E2 (Spine b') qs', qs)
 annotateEta (v :\ e)
-    | E2 e' qs' <- annotateEta e
-    = E2 (v :\ e') qs'
+    | (E2 e' qs', qs) <- annotateEta e
+    = (E2 (v :\ e') qs', qs)
 annotateEta ((Ev p :: Ev p) :\\ (e :: Eta sym ps b))
-    -- By ":\\", "qs ~ Remove p ps" but "Insert p (Remove p ps) ~/~ ps" since
-    -- the order might change. That is, we cannot recover the inner qual. rep.
-    -- "ps" from "qs". At best "ps >= ps'" and "ps' >= ps" where
-    -- "ps' ~ Insert p qs". Hence "annotateEta" must either return a rep. of
-    -- "qs" itself, or accept a "(>=)"-equal qual. rep.
-    | E2 (e' :: Eta (sym :&: L) ps' b) (ps' :: QualRep ps') <- annotateEta e
+    -- By ":\\", "qs ~ ps - p" but "(ps - p) + p ~/~ ps" because the order might
+    -- change; we cannot recover the rep. of "ps" from "qs" and "p". Hence the
+    -- need for "annotateEta @qs" to return a rep. of "qs".
+    | (E2 (e' :: Eta (sym :&: L) ps' b) (ps' :: QualRep ps'), ps) <- annotateEta e
     -- By ":\\" and "E2", know that "p in ps", "qs ~ ps - p" and "ps' >= ps".
     -- 1: "p in ps'" from "p :\\ e'".
     --   As "ps' >= ps" and "p in ps", then "p in ps'".
     , Refl :: Elem p ps' :~: 'True
-        <- Q.witExtIn (Proxy @p) (undefined :: QualRep ps) ps' Refl Refl
+        <- Q.witExtIn (Proxy @p) ps ps' Refl Refl
     -- 2: "(ps' - p) >= qs" from "E2 _ (ps' - p)".
     --   As "qs ~ ps - p", then "(ps' - p) >= qs ~ (ps' - p) >= (ps - p)".
     --   "(ps' - p) >= (ps - p)" is eq. to "ps' >= ps".
     , Refl :: Extends (Remove p ps) (Remove p ps') :~: Extends ps ps'
-        <- Q.witExtShrink (Proxy @p) (undefined :: QualRep ps) ps' Refl
+        <- Q.witExtShrink (Proxy @p) ps ps' Refl
     --
-    = E2 (Ev p :\\ e') (Q.remove (Proxy @p) ps')
+    = (E2 (Ev p :\\ e') (Q.remove (Proxy @p) ps'), Q.remove (Proxy @p) ps)
 
 annotateArgs :: forall (sym :: Symbol (Put Nat) *) rs sig
     .  (Sym sym, Annotate sym, L.Rgn :<: sym)
@@ -131,9 +131,9 @@ annotateArgs (T.Nil) = Nil
 annotateArgs ((e :: Eta sym ps a) T.:* (as :: Args sym qs b)) =
     -- Goal: annotateEta e :* annotateArgs as.
     -- By "T.:*", know that "rs ~ 'T.Union ps qs".
-    let e'  = annotateEta e in
+    let (e', ps) = annotateEta e in
     let as' = annotateArgs as in
-    Arg e' (undefined :: QualRep ps) as'
+    Arg e' ps as'
 annotateArgs ((p :: Ev p) T.:~ (as :: Args sym ps b)) =
     -- Goal: .. p :~ annotateArgs as
     -- By "T.:~", know that "rs ~ 'T.Insert p ps".
@@ -156,9 +156,8 @@ annotateSym sym as =
 annotateASTF :: forall (sym :: Symbol (Put Nat) *) qs a
     .  (Sym sym, Annotate sym, L.Rgn :<: sym)
     => ASTF sym qs a
-    -> QualRep qs
     -> Beta2 (sym :&: L) ((>=) qs) ('Const a)
-annotateASTF ast _ = T.constMatch annotateSym undefined ast
+annotateASTF ast = T.constMatch annotateSym undefined ast
 
 -- annotate :: forall (sym :: Symbol (Put Nat) *) qs a
 --     .  (Sym sym, L.Rgn :<: sym)
