@@ -34,7 +34,8 @@ import Prelude hiding (succ)
 --------------------------------------------------------------------------------
 
 class Sym sym => Annotate sym where
-    annotate :: sym a -> () -- sym a -> label a -> ann (result a)
+    annotate :: sym sig -> L (Result sig)
+    -- sym a -> label a -> ann (result a)
 
 -- Beta w/ ex. qualifiers bound by a constraint.
 type Beta2 :: forall p . Symbol p * -> (Qualifier p -> Constraint) -> Signature p * -> *
@@ -54,7 +55,8 @@ data L a = L
 type Args2 :: forall p . Symbol p * -> Arguments p -> Signature p * -> *
 data Args2 sym qs sig where
     Nil :: Args2 sym ('T.Empty) ('Const a)
-    Arg :: Eta2 sym ((>=) ps) a -> QualRep ps -> Args2 sym qs sig -> Args2 sym ('T.Union ps qs) (a ':-> sig)
+    Arg :: Eta2 sym ((>=) ps) a -> QualRep ps -> Args2 sym qs sig
+        -> Args2 sym ('T.Union ps qs) (a ':-> sig)
     Rgn :: Ev p -> Args2 sym qs sig -> Args2 sym ('T.Insert p qs) (p ':=> sig)
 
 -- Extends as a class so it can be partially applied.
@@ -65,10 +67,36 @@ instance (Extends ps qs ~ 'True) => (>=) ps qs
 -- but the fully applied constraint "qs >= ps". The >= symbol can then be a bit
 -- confusing as |qs| < |ps|.
 
+annotateBeta ::  forall (sym :: Symbol (Put Nat) *) ps rs qs sig a
+    .  (Sym sym, L.Rgn :<: sym, 'Const a ~ Result sig, SmartApply ps rs ~ qs)
+    => Beta2 (sym :&: L) ((>=) ps) sig
+    -> Args2 (sym :&: L) rs sig
+    -> QualRep ps
+    -> SigRep sig
+    -> Beta2 (sym :&: L) ((>=) qs) ('Const a)
+annotateBeta b Nil ps (S.SigConst)
+    -- By "Nil", know that "rs ~ 'T.Empty'" and thus "qs ~ ps".
+    = b
+annotateBeta (B2 b (ps' :: QualRep ps'))
+             (Arg (E2 e (l' :: QualRep l')) (l :: QualRep l) as) ps
+             (S.SigPart _ sig)
+    -- By "Arg", know that "rs ~ 'T.Union l r" and thus
+    -- "qs ~ SmartApply (Union ps l) r".
+    -- 1: "(ps' + l') >= (ps + l)" from rec. call.
+    -- As "ps' >= ps" and "l' >= l", then "(ps' + l') >= (ps + l)".
+    | Refl :: Extends (Union ps l) (Union ps' l') :~: 'True
+        <- Q.witEUBoth ps ps' l l' Refl Refl
+    --
+    = annotateBeta (B2 (b :$ e) (Q.union ps' l')) as (Q.union ps l) sig
+annotateBeta (B2 b ps') (Rgn ev as) ps (S.SigPred evp sig)
+    -- By Rgn, know that "rs ~ 'T.Insert p r" and thus
+    -- "qs ~ SmartApply (p ':. ps) r".
+    = annotateBeta (B2 (b :# ev) (Q.cons evp ps')) as (Q.cons evp ps) sig
+
 annotateEta :: forall (sym :: Symbol (Put Nat) *) qs sig
-    .  (Sym sym, L.Rgn :<: sym)
+    .  (Sym sym, Annotate sym, L.Rgn :<: sym)
     => Eta sym qs sig
-    -> Eta2 sym ((>=) qs) sig
+    -> Eta2 (sym :&: L) ((>=) qs) sig
 annotateEta (Spine b)
     | B2 b' qs' <- annotateASTF b (undefined :: QualRep qs)
     = E2 (Spine b') qs'
@@ -76,62 +104,60 @@ annotateEta (v :\ e)
     | E2 e' qs' <- annotateEta e
     = E2 (v :\ e') qs'
 annotateEta ((Ev p :: Ev p) :\\ (e :: Eta sym ps b))
-    | E2 (e' :: Eta sym ps' b) (ps' :: QualRep ps') <- annotateEta e
-    -- By :\\ and E2, know that "p in ps", "qs ~ ps - p" and "ps' >= ps"
+    -- By ":\\", "qs ~ Remove p ps" but "Insert p (Remove p ps) ~/~ ps" since
+    -- the order might change. That is, we cannot recover the inner qual. rep.
+    -- "ps" from "qs". At best "ps >= ps'" and "ps' >= ps" where
+    -- "ps' ~ Insert p qs". Hence "annotateEta" must either return a rep. of
+    -- "qs" itself, or accept a "(>=)"-equal qual. rep.
+    | E2 (e' :: Eta (sym :&: L) ps' b) (ps' :: QualRep ps') <- annotateEta e
+    -- By ":\\" and "E2", know that "p in ps", "qs ~ ps - p" and "ps' >= ps".
     -- 1: "p in ps'" from "p :\\ e'".
     --   As "ps' >= ps" and "p in ps", then "p in ps'".
     , Refl :: Elem p ps' :~: 'True
         <- Q.witExtIn (Proxy @p) (undefined :: QualRep ps) ps' Refl Refl
-    -- 2: "(ps' - p) >= qs" from "E2 _ (ps' - p)"
-    --   As "qs ~ ps - p", then "(ps' - p) >= qs ~ (ps' - p) >= (ps - p)"
-    --   Know that (ps' - p) >= (ps - p) is eq. to ps' >= ps
+    -- 2: "(ps' - p) >= qs" from "E2 _ (ps' - p)".
+    --   As "qs ~ ps - p", then "(ps' - p) >= qs ~ (ps' - p) >= (ps - p)".
+    --   "(ps' - p) >= (ps - p)" is eq. to "ps' >= ps".
     , Refl :: Extends (Remove p ps) (Remove p ps') :~: Extends ps ps'
         <- Q.witExtShrink (Proxy @p) (undefined :: QualRep ps) ps' Refl
     --
     = E2 (Ev p :\\ e') (Q.remove (Proxy @p) ps')
 
-annotateBeta ::  forall (sym :: Symbol (Put Nat) *) ps ps' rs qs sig a
-    .  ( Sym sym, L.Rgn :<: sym, 'Const a ~ Result sig
-       , SmartApply ps rs ~ qs, Extends ps ps' ~ 'True)
-    => Beta (sym :&: L) ps' sig
-    -> Args2 (sym :&: L) rs sig
-    -> QualRep ps
-    -> SigRep sig
-    -> Beta2 (sym :&: L) ((>=) qs) ('Const a)
-annotateBeta b Nil ps (S.SigConst)
-    = B2 b (undefined :: QualRep ps')
-annotateBeta b (Arg (E2 e (l' :: QualRep l')) (l :: QualRep l) as) ps (S.SigPart _ sig)
-    -- rs ~ 'T.Union l r
-    -- qs ~ SmartApply (Union ps l) r
-    | Refl :: Extends (Union ps l) (Union ps' l') :~: 'True
-        <- Q.witEUBoth ps (undefined :: QualRep ps') l l' Refl Refl
-    --
-    = annotateBeta (b :$ e) as (Q.union ps l) sig
-annotateBeta b (Rgn ev as) ps (S.SigPred evp sig)
-    -- rs ~ 'T.Insert p r
-    -- qs ~ SmartApply (p ':. ps) r
-    = annotateBeta (b :# ev) as (Q.cons evp ps) sig
-
 annotateArgs :: forall (sym :: Symbol (Put Nat) *) rs sig
-    .  (Sym sym, L.Rgn :<: sym)
+    .  (Sym sym, Annotate sym, L.Rgn :<: sym)
     => Args sym rs sig
-    -> Args2 sym rs sig
+    -> Args2 (sym :&: L) rs sig
 annotateArgs (T.Nil) = Nil
-annotateArgs (e T.:* as) = undefined -- annotateEta e :* annotateArgs as
-annotateArgs (p T.:~ as) = undefined -- .. p :~ annotateArgs as
+annotateArgs ((e :: Eta sym ps a) T.:* (as :: Args sym qs b)) =
+    -- Goal: annotateEta e :* annotateArgs as.
+    -- By "T.:*", know that "rs ~ 'T.Union ps qs".
+    let e'  = annotateEta e in
+    let as' = annotateArgs as in
+    Arg e' (undefined :: QualRep ps) as'
+annotateArgs ((p :: Ev p) T.:~ (as :: Args sym ps b)) =
+    -- Goal: .. p :~ annotateArgs as
+    -- By "T.:~", know that "rs ~ 'T.Insert p ps".
+    let as' = annotateArgs as in
+    Rgn p as'
 
 annotateSym :: forall (sym :: Symbol (Put Nat) *) qs rs a sig
-    .  (Sym sym, L.Rgn :<: sym, SmartApply 'None rs ~ qs, Result sig ~ 'Const a)
+    .  ( Sym sym, Annotate sym, L.Rgn :<: sym, SmartApply 'None rs ~ qs
+       , Result sig ~ 'Const a)
     => sym sig
     -> Args sym rs sig
-    -> Beta2 sym ((>=) qs) ('Const a)
-annotateSym = undefined -- annotateArgs as
+    -> Beta2 (sym :&: L) ((>=) qs) ('Const a)
+annotateSym sym as =
+    let sig = symbol sym in
+    let as' = annotateArgs as in
+    let l   = annotate sym in
+    let b   = B2 (Sym (sym :&: l)) Q.QualNone in
+    annotateBeta b as' Q.QualNone sig
 
 annotateASTF :: forall (sym :: Symbol (Put Nat) *) qs a
-    .  (Sym sym, L.Rgn :<: sym)
+    .  (Sym sym, Annotate sym, L.Rgn :<: sym)
     => ASTF sym qs a
     -> QualRep qs
-    -> Beta2 sym ((>=) qs) ('Const a)
+    -> Beta2 (sym :&: L) ((>=) qs) ('Const a)
 annotateASTF ast _ = T.constMatch annotateSym undefined ast
 
 -- annotate :: forall (sym :: Symbol (Put Nat) *) qs a
