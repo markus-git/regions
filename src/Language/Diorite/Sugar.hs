@@ -37,8 +37,9 @@ class Syntactic a where
     type Internal a :: Signature p *
     sugar   :: Pred a ~ p => Beta @p (Domain @p a) (Context @p a) (Internal @p a) -> a
     desugar :: Pred a ~ p => a -> Eta @p (Domain @p a) (Context @p a) (Internal @p a)
+-- todo: 'p' does not really matter to sugar/desugar but is everywhere.
 
-instance Syntactic (Beta @p sym qs ('Const a)) where
+instance Qual qs => Syntactic (Beta @p sym qs ('Const a)) where
     type Pred     (Beta sym qs ('Const a)) = p
     type Domain   (Beta sym qs ('Const a)) = sym
     type Context  (Beta sym qs ('Const a)) = qs
@@ -46,7 +47,7 @@ instance Syntactic (Beta @p sym qs ('Const a)) where
     sugar   = id
     desugar = Spine
 
-instance Syntactic (Eta @p sym qs ('Const a)) where
+instance Qual qs => Syntactic (Eta @p sym qs ('Const a)) where
     type Pred     (Eta sym qs ('Const a)) = p
     type Domain   (Eta sym qs ('Const a)) = sym
     type Context  (Eta sym qs ('Const a)) = qs
