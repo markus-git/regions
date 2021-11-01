@@ -58,10 +58,10 @@ type family SmartApply qs ex where
 --      repersentation of the symbol's constraints, and its sub-trees given as
 --      'Args'.
 match :: forall p sym qs a (c :: Signature p * -> *)
-    .  (forall rs sig . ('Const a ~ Result sig, qs ~ SmartApply 'None rs)
+    .  (forall rs sig . (a ~ Result sig, qs ~ SmartApply 'None rs)
             => sym sig -> Args sym rs sig -> c ('Const a))
        -- ^ Match on a symbol.
-    -> (forall ps rs sig . ('Const a ~ Result sig, qs ~ SmartApply ps rs, Sig sig)
+    -> (forall ps rs sig . (a ~ Result sig, qs ~ SmartApply ps rs, Sig sig)
             => Name -> QualRep ps -> Args sym rs sig -> c ('Const a))
        -- ^ Lookup and instantiate a variable.
     -> ASTF sym qs a
@@ -70,9 +70,7 @@ match :: forall p sym qs a (c :: Signature p * -> *)
 match matchSym matchVar = flip matchBeta Nil
   where
     matchBeta :: forall ps rs sig
-        .  ( 'Const a ~ Result sig
-           , qs ~ SmartApply ps rs
-           )
+        .  (a ~ Result sig, qs ~ SmartApply ps rs)
         => Beta sym ps sig
         -> Args sym rs sig
         -> c ('Const a)
@@ -83,9 +81,9 @@ match matchSym matchVar = flip matchBeta Nil
 
 -- | A version of 'match' with a simpler, constant result type.
 constMatch :: forall sym qs a b
-    .  (forall rs sig . ('Const a ~ Result sig, qs ~ SmartApply 'None rs)
+    .  (forall rs sig . (a ~ Result sig, qs ~ SmartApply 'None rs)
             => sym sig -> Args sym rs sig -> b)
-    -> (forall ps rs sig . ('Const a ~ Result sig, qs ~ SmartApply ps rs, Sig sig)
+    -> (forall ps rs sig . (a ~ Result sig, qs ~ SmartApply ps rs, Sig sig)
             => Name -> QualRep ps -> Args sym rs sig -> b)
     -> ASTF sym qs a -> b
 constMatch f g = A.getConst . match (\s -> A.Const . f s) (\n r -> A.Const . g n r)
@@ -96,9 +94,9 @@ newtype WrapBeta c sym qs sig = WrapBeta { unWrapBeta :: c (Beta sym qs sig) }
 -- | A version of 'match' where the result is a transformed syntax tree, wrapped
 --   in some type constructor.
 transMatch :: forall sym sym' qs c a
-    .  (forall rs sig . ('Const a ~ Result sig, qs ~ SmartApply 'None rs)
+    .  (forall rs sig . (a ~ Result sig, qs ~ SmartApply 'None rs)
             => sym sig -> Args sym rs sig -> c (ASTF sym' qs a))
-    -> (forall ps rs sig . ('Const a ~ Result sig, qs ~ SmartApply ps rs, Sig sig)
+    -> (forall ps rs sig . (a ~ Result sig, qs ~ SmartApply ps rs, Sig sig)
             => Name -> QualRep ps -> Args sym rs sig -> c (ASTF sym' qs a))
     -> ASTF sym qs a -> c (ASTF sym' qs a)
 transMatch f g = unWrapBeta . match (\s -> WrapBeta . f s) (\n r -> WrapBeta . g n r)

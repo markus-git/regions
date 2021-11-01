@@ -19,6 +19,7 @@ import Language.Diorite.Interpretation (Render(..))
 --------------------------------------------------------------------------------
 
 -- | Decorating symbols with additional information.
+type (:&:) :: forall p . (Signature p * -> *) -> (* -> *) -> Signature p * -> *
 data (sym :&: info) sig where
     (:&:) :: { _sym   :: sym sig
              , _decor :: info (Result sig)

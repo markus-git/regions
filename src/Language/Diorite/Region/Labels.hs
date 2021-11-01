@@ -214,10 +214,10 @@ data Rgn sig where
 -- ** ...
 
 -- | Introduce a local binding for place 'p', associated with region 'r'.
-local :: forall r (sym :: Symbol (Put r) *) qs (p :: r) (info :: Signature (Put r) * -> *) a
+local :: forall r (sym :: Symbol (Put r) *) qs (p :: r) info a
     .  (Rgn :<: sym, Qual qs, Elem ('Put p) qs ~ 'True, Typeable p, Typeable r)
     => Place p
-    -> info ('S.Const a)
+    -> info a
     -> ASTF (sym :&: info) qs a
     -> ASTF (sym :&: info) (Remove ('Put p) qs) a
 local p i ast = sym :$ (p :\\ Spine ast)
@@ -229,10 +229,10 @@ local p i ast = sym :$ (p :\\ Spine ast)
 --       a first-order type it should be fine to limit 'local' to 'ASTF' values.
 
 -- | Annotate a value-expression with the place to store its result in.
-atBeta :: forall r (sym :: Symbol (Put r) *) qs (info :: Signature (Put r) * -> *) (p :: r) a
+atBeta :: forall r (sym :: Symbol (Put r) *) qs info (p :: r) a
     .  (Rgn :<: sym, Qual qs, Remove ('Put p) qs ~ qs)
     => ASTF (sym :&: info) qs a
-    -> info ('S.Const a)
+    -> info a
     -> Place p
     -> ASTF (sym :&: info) ('Put p ':. qs) a
 atBeta ast i p = sym :# p :$ Spine ast
@@ -242,7 +242,7 @@ atBeta ast i p = sym :# p :$ Spine ast
 -- note: 'Spine' is for values, hence sep. 'Beta'/'Eta' variants of 'at'.
 
 -- | Annotate a function with the place to store its closure in.
-atEta :: forall r (sym :: Symbol (Put r) *) qs (info :: Signature (Put r) * -> *) (p :: r) sig
+atEta :: forall r (sym :: Symbol (Put r) *) qs (info :: * -> *) (p :: r) sig
     .  (Rgn :<: sym, Remove ('Put p) qs ~ qs)
     => Eta (sym :&: info) qs sig
     -> info (Result sig)

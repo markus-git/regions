@@ -38,9 +38,9 @@ data Signature p a =
 infixr 2 :->, :=>
 
 -- | Denotational result of a symbol's signature.
-type Result :: forall p . Signature p * -> Signature p *
+type Result :: forall p . Signature p * -> *
 type family Result sig where
-    Result ('Const a) = 'Const a
+    Result ('Const a) = a
     Result (_ ':-> b) = Result b
     Result (_ ':=> a) = Result a
 
@@ -60,7 +60,9 @@ data SigRep sig where
     SigConst :: Typeable a => SigRep ('Const a)
     SigPart  :: SigRep a -> SigRep sig -> SigRep (a ':-> sig)
     SigPred  :: Typeable p => Proxy p -> SigRep sig -> SigRep (p ':=> sig)
--- todo: My '*Rep' types are apparently called singletons?
+-- note: My '*Rep' types are apparently called singletons?
+-- note: These 'Typeable' constraints leak to users through 'Sig', annoying but
+-- probably harmless.
 
 -- | Valid symbol signatures.
 type  Sig :: forall p . Signature p * -> Constraint
@@ -79,7 +81,7 @@ instance (Typeable p, Sig sig) => Sig (p ':=> sig) where
 --------------------------------------------------------------------------------
 -- ** ...
 
-result :: SigRep sig -> SigRep (Result sig)
+result :: SigRep sig -> SigRep ('Const (Result sig))
 result (SigConst)    = SigConst
 result (SigPart _ b) = result b
 result (SigPred _ a) = result a

@@ -10,14 +10,14 @@ import Language.Diorite.Syntax
 import Language.Diorite.Traversal (Arguments, Args, SmartApply)
 import Language.Diorite.Decoration ((:&:)(..))
 import Language.Diorite.Region.Labels (Put(..)) --(Put(..), Label, Strip, Dress, LblRep, Place)
-import Language.Diorite.Region.Labels.Witness (NatRep(..))
+--import Language.Diorite.Region.Labels.Witness (NatRep(..))
 import qualified Language.Diorite.Signatures as S
 import qualified Language.Diorite.Qualifiers as Q
 import qualified Language.Diorite.Qualifiers.Witness as Q
 import qualified Language.Diorite.Traversal as T
 import qualified Language.Diorite.Decoration as D
 import qualified Language.Diorite.Region.Labels as L
-import qualified Language.Diorite.Region.Labels.Witness as L
+--import qualified Language.Diorite.Region.Labels.Witness as L
 
 import Data.Constraint (Dict(..), Constraint)
 import Data.Type.Equality ((:~:)(..))
@@ -37,7 +37,7 @@ import Prelude hiding (succ)
 -- ** ...
 
 -- ...
-type Labels :: forall p . (Signature p * -> *) -> Signature p * -> *
+type Labels :: forall p . (* -> *) -> Signature p * -> *
 data Labels l sig where
     Nil  :: Labels l ('Const a)
     (:*) :: l (Result a) -> Labels l sig -> Labels l (a ':-> sig)
@@ -46,11 +46,11 @@ data Labels l sig where
 infixr :*, :~
 
 -- ...
-class Sym sym => Annotate sym where
-    type Label sym :: forall p . Signature p * -> *
-    annotate :: sym sig -> Labels (Label sym) sig -> Label sym (Result sig)
+class Sym sym => Label sym where
+    type Lbl sym :: * -> *
+    label :: sym sig -> Labels (Lbl sym) sig -> Lbl sym (Result sig)
 
-type L sym = sym :&: (Label sym)
+type L sym = sym :&: (Lbl sym)
 
 --------------------------------------------------------------------------------
 -- ** ...
@@ -83,10 +83,8 @@ instance (Extends ps qs ~ 'True) => (>=) ps qs
 -- but the fully applied constraint "qs >= ps". The >= symbol can then be a bit
 -- confusing as |qs| < |ps|.
 
-data X sig
-
 annotateBeta ::  forall (sym :: Symbol (Put Nat) *) ps rs qs sig a
-    .  (Sym sym, L.Rgn :<: sym, 'Const a ~ Result sig, SmartApply ps rs ~ qs)
+    .  (Sym sym, L.Rgn :<: sym, a ~ Result sig, SmartApply ps rs ~ qs)
     => Beta2 (L sym) ((>=) ps) sig
     -> Args2 (L sym) rs sig
     -> QualRep ps
@@ -112,9 +110,9 @@ annotateBeta (B2 b ps') (Rgn2 ev as) ps (S.SigPred p sig)
     = annotateBeta (B2 (b :# ev) (Q.cons p ps')) as (Q.cons p ps) sig
 
 annotateEta :: forall (sym :: Symbol (Put Nat) *) qs sig
-    .  (Sym sym, Annotate sym, L.Rgn :<: sym)
+    .  (Sym sym, Label sym, L.Rgn :<: sym)
     => Eta sym qs sig
-    -> (Eta2 (L sym) ((>=) qs) sig, QualRep qs, Label sym (Result sig))
+    -> (Eta2 (L sym) ((>=) qs) sig, QualRep qs, Lbl sym (Result sig))
 annotateEta (Spine b)
     | qs :: QualRep qs <- Q.qualifier
     , (B2 b' qs', l) <- annotateASTF b -- (qs :: QualRep qs)
@@ -143,9 +141,9 @@ annotateEta ((Ev p :: Ev p) :\\ (e :: Eta sym ps b))
     = (E2 (Ev p :\\ e') (Q.remove (Proxy @p) ps'), Q.remove (Proxy @p) ps, l)
 
 annotateArgs :: forall (sym :: Symbol (Put Nat) *) rs sig
-    .  (Sym sym, Annotate sym, L.Rgn :<: sym)
+    .  (Sym sym, Label sym, L.Rgn :<: sym)
     => Args sym rs sig
-    -> (Args2 (L sym) rs sig, Labels (Label sym) sig)
+    -> (Args2 (L sym) rs sig, Labels (Lbl sym) sig)
 annotateArgs (T.Nil) = (Nil2, Nil)
 annotateArgs ((e :: Eta sym ps a) T.:* (as :: Args sym qs b)) =
     -- By "T.:*", know that "rs ~ 'T.Union ps qs".
@@ -158,23 +156,23 @@ annotateArgs ((p :: Ev p) T.:~ (as :: Args sym ps b)) =
     (Rgn2 p as', p :~ ls)
 
 annotateSym :: forall (sym :: Symbol (Put Nat) *) qs rs a sig
-    .  ( Sym sym, Annotate sym, L.Rgn :<: sym, SmartApply 'None rs ~ qs
-       , Result sig ~ 'Const a)
+    .  ( Sym sym, Label sym, L.Rgn :<: sym, SmartApply 'None rs ~ qs
+       , a ~ Result sig)
     => sym sig
     -> Args sym rs sig
-    -> (Beta2 (L sym) ((>=) qs) ('Const a), Label sym ('Const @(Put Nat) a))
+    -> (Beta2 (L sym) ((>=) qs) ('Const a), Lbl sym a)
 annotateSym sym as =
     let sig = symbol sym in
     let (as', ls) = annotateArgs as in
-    let l = annotate sym ls in
+    let l = label sym ls in
     let b = B2 (Sym (sym :&: l)) Q.QualNone in
     let b' = annotateBeta b as' Q.QualNone sig in
     (b', l)
 
 annotateASTF :: forall (sym :: Symbol (Put Nat) *) qs a
-    .  (Sym sym, Annotate sym, L.Rgn :<: sym)
+    .  (Sym sym, Label sym, L.Rgn :<: sym)
     => ASTF sym qs a
-    -> (Beta2 (L sym) ((>=) qs) ('Const a), Label sym ('Const @(Put Nat) a))
+    -> (Beta2 (L sym) ((>=) qs) ('Const a), Lbl sym a)
 annotateASTF ast = T.constMatch annotateSym undefined ast
 
 -- annotate :: forall (sym :: Symbol (Put Nat) *) qs a
@@ -482,88 +480,88 @@ annotateASTF ast = T.constMatch annotateSym undefined ast
 -- * ...
 --------------------------------------------------------------------------------
 
-type ArgsRep :: T.Arguments (Put Nat) -> *
-data ArgsRep qs where
-    ArgsEmpty  :: ArgsRep ('T.Empty)
-    ArgsUnion  :: QualRep qs -> ArgsRep ps -> ArgsRep ('T.Union qs ps)
-    ArgsInsert :: NatRep n -> ArgsRep qs -> ArgsRep ('T.Insert ('Put n) qs)
+-- type ArgsRep :: T.Arguments (Put Nat) -> *
+-- data ArgsRep qs where
+--     ArgsEmpty  :: ArgsRep ('T.Empty)
+--     ArgsUnion  :: QualRep qs -> ArgsRep ps -> ArgsRep ('T.Union qs ps)
+--     ArgsInsert :: NatRep n -> ArgsRep qs -> ArgsRep ('T.Insert ('Put n) qs)
     
 --------------------------------------------------------------------------------
 -- ** ...
 
-witArgsElem :: forall a as bs . Typeable a => Proxy a -> QualRep as -> ArgsRep bs
-    -> Elem a as :~: 'True
-    -> Elem a (SmartApply as bs) :~: 'True
-witArgsElem _ _ (ArgsEmpty) el = el
-witArgsElem a as (ArgsUnion qs ps) el
-    | Refl <- Q.witElemUni a as qs el
-    = witArgsElem a (Q.union as qs) ps Refl
-witArgsElem a as (ArgsInsert (n :: NatRep n) qs) Refl
-    | Dict :: Dict (KnownNat n) <- L.withKnownNat n Dict
-    , Refl <- Q.witEqIf @_ @_ @('True) a pn
-    = witArgsElem a (Q.QualPred pn as) qs Refl
-  where
-    pn = Proxy :: Proxy ('Put n)
+-- witArgsElem :: forall a as bs . Typeable a => Proxy a -> QualRep as -> ArgsRep bs
+--     -> Elem a as :~: 'True
+--     -> Elem a (SmartApply as bs) :~: 'True
+-- witArgsElem _ _ (ArgsEmpty) el = el
+-- witArgsElem a as (ArgsUnion qs ps) el
+--     | Refl <- Q.witElemUni a as qs el
+--     = witArgsElem a (Q.union as qs) ps Refl
+-- witArgsElem a as (ArgsInsert (n :: NatRep n) qs) Refl
+--     | Dict :: Dict (KnownNat n) <- L.withKnownNat n Dict
+--     , Refl <- Q.witEqIf @_ @_ @('True) a pn
+--     = witArgsElem a (Q.QualPred pn as) qs Refl
+--   where
+--     pn = Proxy :: Proxy ('Put n)
 
-witArgsExt :: forall as bs cs . QualRep as -> QualRep bs -> ArgsRep cs
-    -> Extends as bs :~: 'True
-    -> Extends as (SmartApply bs cs) :~: 'True
-witArgsExt _ _ (ArgsEmpty) ext = ext
-witArgsExt as bs (ArgsUnion qs ps) ext =
-    witArgsExt as (Q.union bs qs) ps (Q.witEUAdd as bs qs ext)
-witArgsExt as bs (ArgsInsert (n :: NatRep n) (qs :: ArgsRep qs)) ext =
-    L.withKnownNat n $
-      witArgsExt as (Q.QualPred (Proxy @('Put n)) bs) qs $
-        Q.witExtCons (Proxy @('Put n)) as bs ext
+-- witArgsExt :: forall as bs cs . QualRep as -> QualRep bs -> ArgsRep cs
+--     -> Extends as bs :~: 'True
+--     -> Extends as (SmartApply bs cs) :~: 'True
+-- witArgsExt _ _ (ArgsEmpty) ext = ext
+-- witArgsExt as bs (ArgsUnion qs ps) ext =
+--     witArgsExt as (Q.union bs qs) ps (Q.witEUAdd as bs qs ext)
+-- witArgsExt as bs (ArgsInsert (n :: NatRep n) (qs :: ArgsRep qs)) ext =
+--     L.withKnownNat n $
+--       witArgsExt as (Q.QualPred (Proxy @('Put n)) bs) qs $
+--         Q.witExtCons (Proxy @('Put n)) as bs ext
 
-witElemInsert :: forall a as bs . Typeable a => Proxy a -> ArgsRep as -> QualRep bs
-    -> Elem a (SmartApply bs ('T.Insert a as)) :~: 'True
-witElemInsert a as bs = witArgsElem a (Q.QualPred a bs) as Refl
+-- witElemInsert :: forall a as bs . Typeable a => Proxy a -> ArgsRep as -> QualRep bs
+--     -> Elem a (SmartApply bs ('T.Insert a as)) :~: 'True
+-- witElemInsert a as bs = witArgsElem a (Q.QualPred a bs) as Refl
 
-witExtUnion :: forall as bs cs . QualRep as -> QualRep bs -> ArgsRep cs
-    -> Extends as (SmartApply bs ('T.Union as cs)) :~: 'True
-witExtUnion as bs cs
-    | Refl <- Q.witExtRefl as
-    , Refl <- Q.witEUAdd as as bs Refl
-    , Refl <- Q.witEURefl as as bs
-    = witArgsExt as (Q.union bs as) cs Refl
+-- witExtUnion :: forall as bs cs . QualRep as -> QualRep bs -> ArgsRep cs
+--     -> Extends as (SmartApply bs ('T.Union as cs)) :~: 'True
+-- witExtUnion as bs cs
+--     | Refl <- Q.witExtRefl as
+--     , Refl <- Q.witEUAdd as as bs Refl
+--     , Refl <- Q.witEURefl as as bs
+--     = witArgsExt as (Q.union bs as) cs Refl
 
 --------------------------------------------------------------------------------
 -- ...
 
-witElemGT :: forall a b cs . NatRep a -> NatRep b -> QualRep cs -> L.QualNat cs
-    -> L.Greatest a cs :~: 'True
-    -> Elem ('Put b) cs :~: 'True
-    -> CmpNat a b :~: 'GT
-witElemGT a b (Q.QualPred c cs) (L.DictPred x xs) Refl Refl =
-    let pb = Proxy @('Put b) in
-    case L.withKnownNat b (Q.testEq pb c) of
-        Left  Refl -> L.thmGT a x cs Refl
-        Right Refl -> witElemGT a b cs xs (L.thmGTRem a x cs Refl) Refl
+-- witElemGT :: forall a b cs . NatRep a -> NatRep b -> QualRep cs -> L.QualNat cs
+--     -> L.Greatest a cs :~: 'True
+--     -> Elem ('Put b) cs :~: 'True
+--     -> CmpNat a b :~: 'GT
+-- witElemGT a b (Q.QualPred c cs) (L.DictPred x xs) Refl Refl =
+--     let pb = Proxy @('Put b) in
+--     case L.withKnownNat b (Q.testEq pb c) of
+--         Left  Refl -> L.thmGT a x cs Refl
+--         Right Refl -> witElemGT a b cs xs (L.thmGTRem a x cs Refl) Refl
 
-witExtGT :: forall a bs cs . NatRep a -> QualRep bs -> L.QualNat bs -> QualRep cs -> L.QualNat cs
-    -> L.Greatest a bs :~: 'True
-    -> Extends cs bs :~: 'True
-    -> L.Greatest a cs :~: 'True
-witExtGT _ _ _ (Q.QualNone) _ _ _ = Refl
-witExtGT a bs bsd (Q.QualPred c cs) (L.DictPred x xs) Refl Refl
-    | Refl <- Q.witExtRem c cs bs Refl
-    , Refl <- witExtGT a bs bsd cs xs Refl Refl
-    , Refl <- Q.witExtElem c cs bs Refl
-    , Refl <- witElemGT a x bs bsd Refl Refl
-    = Refl
+-- witExtGT :: forall a bs cs . NatRep a -> QualRep bs -> L.QualNat bs -> QualRep cs -> L.QualNat cs
+--     -> L.Greatest a bs :~: 'True
+--     -> Extends cs bs :~: 'True
+--     -> L.Greatest a cs :~: 'True
+-- witExtGT _ _ _ (Q.QualNone) _ _ _ = Refl
+-- witExtGT a bs bsd (Q.QualPred c cs) (L.DictPred x xs) Refl Refl
+--     | Refl <- Q.witExtRem c cs bs Refl
+--     , Refl <- witExtGT a bs bsd cs xs Refl Refl
+--     , Refl <- Q.witExtElem c cs bs Refl
+--     , Refl <- witElemGT a x bs bsd Refl Refl
+--     = Refl
 
-witGtAny :: forall a b cs . NatRep a -> NatRep b -> QualRep cs -> L.QualNat cs
-    -> CmpNat a b :~: 'GT
-    -> L.Greatest b cs :~: 'True
-    -> L.Greatest a cs :~: 'True
-witGtAny _ _ (Q.QualNone) _ _ _ = Refl
-witGtAny a b (Q.QualPred c cs) (L.DictPred x xs) Refl Refl
-    | Refl <- L.thmGTRem b x cs Refl
-    , Refl <- witGtAny a b cs xs Refl Refl
-    , Refl <- L.thmGT b x cs Refl
-    , Refl <- L.witCmpTrans a b x L.Gt Refl Refl
-    = Refl
+-- witGtAny :: forall a b cs . NatRep a -> NatRep b -> QualRep cs -> L.QualNat cs
+--     -> CmpNat a b :~: 'GT
+--     -> L.Greatest b cs :~: 'True
+--     -> L.Greatest a cs :~: 'True
+-- witGtAny _ _ (Q.QualNone) _ _ _ = Refl
+-- witGtAny a b (Q.QualPred c cs) (L.DictPred x xs) Refl Refl
+--     | Refl <- L.thmGTRem b x cs Refl
+--     , Refl <- witGtAny a b cs xs Refl Refl
+--     , Refl <- L.thmGT b x cs Refl
+--     , Refl <- L.witCmpTrans a b x L.Gt Refl Refl
+--     = Refl
 
 --------------------------------------------------------------------------------
 -- Fin.
