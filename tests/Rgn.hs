@@ -11,7 +11,6 @@ import Language.Diorite.Syntax
 import Language.Diorite.Decoration
 import Language.Diorite.Interpretation
 import qualified Language.Diorite.Region.Annotation as A
-import qualified Language.Diorite.Region.Labels as L
 
 import Data.Typeable
 import Data.Constraint (Constraint)
@@ -25,7 +24,7 @@ import GHC.TypeNats
 --------------------------------------------------------------------------------
 -- ** Example language based on 'D'.
 
-type D :: Signature (L.Put Nat) * -> *
+type D :: Signature (A.Put Nat) * -> *
 data D a where
     -- Numerical
     Num :: Int -> D ('Const Int)
@@ -72,13 +71,13 @@ instance (T a, T b) => T (a, b) where
     tyrep = TTup tyrep tyrep
 
 type B :: * -> *
-type B a = Beta (D :&: TR) ('None :: Qualifier (L.Put Nat)) ('Const a)
+type B a = Beta @(A.Put Nat) (D :&: TR) ('None) ('Const a)
 
 smartD ::
     forall
-       (es  :: Exists    (L.Put Nat))
-       (sub :: Signature (L.Put Nat) * -> *)
-       (sig :: Signature (L.Put Nat) *)
+       (es  :: Exists    (A.Put Nat))
+       (sub :: Signature (A.Put Nat) * -> *)
+       (sig :: Signature (A.Put Nat) *)
        (f   :: *)
     .  ( Sig sig
        , Ex es
@@ -128,26 +127,34 @@ ex3 = share (num 2) (\x -> l_ (tup x (add x (neg x))))
 --------------------------------------------------------------------------------
 -- ** Annotation of expressions in 'D'.
 
--- type L :: forall p . Signature p * -> *
--- data L sig where
---     LTR :: TR a -> L ('Const a)
+type LR :: * -> *
+data LR a where
+    LInt :: LR Int
+    LTup :: LR a -> LR b -> LR (a, b)
 
 -- int : () -> Int^a
 -- neg : Int^a -> Int^b
 -- add : Int^a, Int^b -> Int^c
 -- let : Int^a, (Int^a -> Int^b) -> Int^b
 -- ...
--- instance A.Label D where
---     type Lbl D = L
---     label (X _) (A.Nil) = undefined
---     label (Y) (_ A.:* A.Nil) = undefined
---     label (Z) (_ A.:* _ A.:* A.Nil) = undefined
---     label (A) (_ A.:* _ A.:* A.Nil) = undefined
+instance A.Lbl D where
+    type Label D = LR
+    label (Num _) (A.Nil) = LInt
+    label (Neg) (_ A.:* A.Nil) = LInt
+    label (Add) (_ A.:* _ A.:* A.Nil) = LInt
+    label (Let) (_ A.:* _ A.:* A.Nil) = LInt
+    label (Tup) (a A.:* b A.:* A.Nil) = LTup a b
+    label (Fst) ((LTup a _) A.:* A.Nil) = a
+    label (Snd) ((LTup _ b) A.:* A.Nil) = b
 
---type EB a = A.Beta2 (A.L (D :+: L.Rgn)) ((A.>=) 'None) ('Const @(L.Put Nat) a)
+type E :: * -> *
+type E a = A.Beta2 @(A.Put Nat) (((D :&: TR) :+: A.Rgn) :&: LR) ((A.>=) 'None) ('Const a)
 
---ann :: B Int -> EB Int
---ann = fst (A.annotateASTF b)
+ann :: B Int -> E Int
+ann b = fst (A.annotateASTF b)
+
+pr :: E Int -> String
+pr (A.B2 b _) = show b
 
 --------------------------------------------------------------------------------
 -- Fin.

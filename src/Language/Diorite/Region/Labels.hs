@@ -45,11 +45,12 @@ module Language.Diorite.Region.Labels
     , thmGTUnique
     ) where
 
-import Language.Diorite.Signatures (Signature, Result, SigRep(..))
+import Language.Diorite.Signatures (Signature, Result, SigRep(..), signature)
 import Language.Diorite.Qualifiers (Qualifier(..), type (:/~:), type (==), If, Remove, Union, Elem, QualRep(..), Qual)
 import Language.Diorite.Qualifiers.Witness
 import Language.Diorite.Syntax
 import Language.Diorite.Decoration ((:&:)(..))
+import Language.Diorite.Interpretation
 import Language.Diorite.Region.Labels.Witness
 import qualified Language.Diorite.Signatures as S (Signature(..))
 
@@ -209,6 +210,14 @@ data Rgn sig where
     Local :: Rgn (('Put r 'S.:=> 'S.Const a) 'S.:-> 'S.Const a)
     At    :: Rgn ('Put r 'S.:=> a 'S.:-> sig)
 -- todo: 'Put r' kind here really limits the choice of qualifiers.
+
+instance Sym Rgn where
+    symbol (Local) = signature
+    symbol (At)    = signature
+
+instance Render Rgn where
+    renderSym (Local) = "Local"
+    renderSym (At)    = "At"
 
 --------------------------------------------------------------------------------
 -- ** ...

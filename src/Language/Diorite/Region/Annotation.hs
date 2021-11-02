@@ -4,19 +4,20 @@
 
 module Language.Diorite.Region.Annotation where
 
-import Language.Diorite.Signatures (Signature(..), Result, SigRep, Sig)
+import Language.Diorite.Signatures (Signature(..), Result, SigRep, Sig, signature)
 import Language.Diorite.Qualifiers (Qualifier(..), Elem, Remove, Union, Extends, QualRep)
 import Language.Diorite.Syntax
 import Language.Diorite.Traversal (Arguments, Args, SmartApply)
 import Language.Diorite.Decoration ((:&:)(..))
-import Language.Diorite.Region.Labels (Put(..)) --(Put(..), Label, Strip, Dress, LblRep, Place)
+import Language.Diorite.Interpretation
+--import Language.Diorite.Region.Labels as L (Put(..), Label, Strip, Dress, LblRep, Place)
 --import Language.Diorite.Region.Labels.Witness (NatRep(..))
 import qualified Language.Diorite.Signatures as S
 import qualified Language.Diorite.Qualifiers as Q
 import qualified Language.Diorite.Qualifiers.Witness as Q
 import qualified Language.Diorite.Traversal as T
 import qualified Language.Diorite.Decoration as D
-import qualified Language.Diorite.Region.Labels as L
+--import qualified Language.Diorite.Region.Labels as L
 --import qualified Language.Diorite.Region.Labels.Witness as L
 
 import Data.Constraint (Dict(..), Constraint)
@@ -33,24 +34,56 @@ import Prelude hiding (succ)
 -- * ...
 --------------------------------------------------------------------------------
 
+-- | Kind for 'Put' predicates, which assert that a region 'r' is allocated.
+data Put r = Put r
+
+-- | Evidence that a region 'r' is allocated.
+type Place :: forall r . r -> *
+type Place r = Ev ('Put r)
+
+-- | Term annotations for region labels.
+type Rgn :: forall p . Signature (Put p) * -> *
+data Rgn sig where
+    -- ^ ...
+    Local :: forall p (r :: p) a
+        .  (Typeable p, Typeable r, Typeable a)
+        => Rgn (('Put r 'S.:=> 'S.Const a) 'S.:-> 'S.Const a)
+    -- ^ ...
+    At :: forall p (r :: p) a sig
+        .  (Typeable p, Typeable r, Sig a, Sig sig)
+        => Rgn ('Put r 'S.:=> a 'S.:-> sig)
+-- todo: 'Put r' kind here really limits the choice of qualifiers.
+
+instance Sym Rgn where
+    symbol (Local) = signature
+    symbol (At)    = signature
+
+instance Render Rgn where
+    renderSym (Local) = "Local"
+    renderSym (At)    = "At"
+
 --------------------------------------------------------------------------------
 -- ** ...
 
 -- ...
-type Labels :: forall p . (* -> *) -> Signature p * -> *
-data Labels l sig where
-    Nil  :: Labels l ('Const a)
-    (:*) :: l (Result a) -> Labels l sig -> Labels l (a ':-> sig)
-    (:~) :: Ev p -> Labels l sig -> Labels l (p ':=> sig)
+type LArgs :: forall p . (* -> *) -> Signature p * -> *
+data LArgs l sig where
+    Nil  :: LArgs l ('Const a)
+    (:*) :: l (Result a) -> LArgs l sig -> LArgs l (a ':-> sig)
+    (:~) :: Ev p -> LArgs l sig -> LArgs l (p ':=> sig)
 
 infixr :*, :~
 
 -- ...
-class Sym sym => Label sym where
-    type Lbl sym :: * -> *
-    label :: sym sig -> Labels (Lbl sym) sig -> Lbl sym (Result sig)
+class Sym sym => Lbl sym where
+    type Label sym :: * -> *
+    label :: sym sig -> LArgs (Label sym) sig -> Label sym (Result sig)
 
-type L sym = sym :&: (Lbl sym)
+instance Lbl sym => Lbl (sym :&: info) where
+    type Label (sym :&: info) = Label sym
+    label = label . _sym
+
+type L sym = (sym :+: Rgn) :&: (Label sym)
 
 --------------------------------------------------------------------------------
 -- ** ...
@@ -84,7 +117,7 @@ instance (Extends ps qs ~ 'True) => (>=) ps qs
 -- confusing as |qs| < |ps|.
 
 annotateBeta ::  forall (sym :: Symbol (Put Nat) *) ps rs qs sig a
-    .  (Sym sym, L.Rgn :<: sym, a ~ Result sig, SmartApply ps rs ~ qs)
+    .  (Sym sym, a ~ Result sig, SmartApply ps rs ~ qs)
     => Beta2 (L sym) ((>=) ps) sig
     -> Args2 (L sym) rs sig
     -> QualRep ps
@@ -110,14 +143,14 @@ annotateBeta (B2 b ps') (Rgn2 ev as) ps (S.SigPred p sig)
     = annotateBeta (B2 (b :# ev) (Q.cons p ps')) as (Q.cons p ps) sig
 
 annotateEta :: forall (sym :: Symbol (Put Nat) *) qs sig
-    .  (Sym sym, Label sym, L.Rgn :<: sym)
+    .  (Sym sym, Lbl sym)
     => Eta sym qs sig
-    -> (Eta2 (L sym) ((>=) qs) sig, QualRep qs, Lbl sym (Result sig))
+    -> (Eta2 (L sym) ((>=) qs) sig, QualRep qs, Label sym (Result sig))
 annotateEta (Spine b)
     | qs :: QualRep qs <- Q.qualifier
     , (B2 b' qs', l) <- annotateASTF b -- (qs :: QualRep qs)
     , Dict <- Q.witQual qs'
-    = (E2 (Spine b') qs', qs, undefined)
+    = (E2 (Spine b') qs', qs, l)
 annotateEta (v :\ e)
     | (E2 e' qs', qs, l) <- annotateEta e
     = (E2 (v :\ e') qs', qs, l)
@@ -141,9 +174,9 @@ annotateEta ((Ev p :: Ev p) :\\ (e :: Eta sym ps b))
     = (E2 (Ev p :\\ e') (Q.remove (Proxy @p) ps'), Q.remove (Proxy @p) ps, l)
 
 annotateArgs :: forall (sym :: Symbol (Put Nat) *) rs sig
-    .  (Sym sym, Label sym, L.Rgn :<: sym)
+    .  (Sym sym, Lbl sym)
     => Args sym rs sig
-    -> (Args2 (L sym) rs sig, Labels (Lbl sym) sig)
+    -> (Args2 (L sym) rs sig, LArgs (Label sym) sig)
 annotateArgs (T.Nil) = (Nil2, Nil)
 annotateArgs ((e :: Eta sym ps a) T.:* (as :: Args sym qs b)) =
     -- By "T.:*", know that "rs ~ 'T.Union ps qs".
@@ -156,27 +189,27 @@ annotateArgs ((p :: Ev p) T.:~ (as :: Args sym ps b)) =
     (Rgn2 p as', p :~ ls)
 
 annotateSym :: forall (sym :: Symbol (Put Nat) *) qs rs a sig
-    .  ( Sym sym, Label sym, L.Rgn :<: sym, SmartApply 'None rs ~ qs
+    .  ( Sym sym, Lbl sym, SmartApply 'None rs ~ qs
        , a ~ Result sig)
     => sym sig
     -> Args sym rs sig
-    -> (Beta2 (L sym) ((>=) qs) ('Const a), Lbl sym a)
+    -> (Beta2 (L sym) ((>=) qs) ('Const a), Label sym a)
 annotateSym sym as =
     let sig = symbol sym in
     let (as', ls) = annotateArgs as in
     let l = label sym ls in
-    let b = B2 (Sym (sym :&: l)) Q.QualNone in
+    let b = B2 (Sym ((inj sym) :&: l)) Q.QualNone in
     let b' = annotateBeta b as' Q.QualNone sig in
     (b', l)
 
 annotateASTF :: forall (sym :: Symbol (Put Nat) *) qs a
-    .  (Sym sym, Label sym, L.Rgn :<: sym)
+    .  (Sym sym, Lbl sym)
     => ASTF sym qs a
-    -> (Beta2 (L sym) ((>=) qs) ('Const a), Lbl sym a)
-annotateASTF ast = T.constMatch annotateSym undefined ast
+    -> (Beta2 (L sym) ((>=) qs) ('Const a), Label sym a)
+annotateASTF ast = T.constMatch annotateSym (error "Var") ast
 
 -- annotate :: forall (sym :: Symbol (Put Nat) *) qs a
---     .  (Sym sym, L.Rgn :<: sym)
+--     .  (Sym sym, Rgn :<: sym)
 --     => ASTF sym qs a
 --     -> Beta2 (sym :&: Ann) ((>=) qs) ('Const a)
 -- annotate ast = undefined -- annotateASTF ...

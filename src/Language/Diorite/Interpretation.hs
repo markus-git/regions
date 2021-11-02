@@ -34,8 +34,8 @@ instance (Render sym1, Render sym2) => Render (sym1 :+: sym2) where
     renderArgs args (InjL l) = renderArgs args l
     renderArgs args (InjR r) = renderArgs args r
 
-instance Render Ev where
-    renderSym (Ev n) = show n
+-- instance Render Ev where
+--     renderSym (Ev n) = show n
 
 instance Render (A.Const String) where
     renderSym = A.getConst
@@ -47,13 +47,16 @@ renderBeta :: Render sym => [String] -> Beta sym qs a -> String
 renderBeta args (Var n)  = renderArgs args (A.Const ('v' : show n))
 renderBeta args (Sym s)  = renderArgs args s
 renderBeta args (s :$ e) = renderBeta (renderEta e : args) s
-renderBeta args (s :# p) = renderBeta (('r' : renderSym p) : args) s
+renderBeta args (s :# p) = renderBeta (('r' : show p) : args) s
 
 -- | Render an 'Eta' spine as concrete syntax.
 renderEta :: Render sym => Eta sym qs a -> String
 renderEta (Spine b) = renderBeta [] b
 renderEta (n :\ e)  = "(\\" ++ ('v' : show n) ++ ". " ++ renderEta e ++ ")"
-renderEta (p :\\ e) = "(/\\" ++ ('r' : renderSym p) ++ ". " ++ renderEta e ++ ")"
+renderEta (p :\\ e) = "(/\\" ++ ('r' : show p) ++ ". " ++ renderEta e ++ ")"
+
+instance Show (Ev q) where
+    show (Ev n) = show n
 
 instance Render sym => Show (Beta sym qs a) where
     show = renderBeta []

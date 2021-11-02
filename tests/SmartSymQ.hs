@@ -30,15 +30,18 @@ type B  q a = B' q ('Const a)
 
 --------------------------------------------------------------------------------
 
-x, xs :: forall k (r1 :: k) (r2 :: k) . (Typeable k, Typeable r1, Typeable r2) => P r1 -> (P r2 -> B (Put r2 ':. 'None) Int) -> B (Put r1 ':. 'None) Int
+x, xs :: forall k (r1 :: k) (r2 :: k) . (Typeable k, Typeable r1, Typeable r2)
+    => P r1 -> (P r2 -> B (Put r2 ':. 'None) Int) -> B (Put r1 ':. 'None) Int
 x  = \r1 -> \f -> Sym X :# r1 :$ (elam (\r2 -> Spine (f r2)))
 xs = smartSym' X
 
-y, ys :: forall k (r :: k) . (Typeable k, Typeable r) => ((P r -> B (Put r ':. 'None) Int) -> B 'None Int) -> B 'None Int
+y, ys :: forall k (r :: k) . (Typeable k, Typeable r)
+    => ((P r -> B (Put r ':. 'None) Int) -> B 'None Int) -> B 'None Int
 y  = \f -> Sym Y :$ lam (\g -> Spine (f (\r -> g :# r)))
 ys = smartSym' Y
 
-z, zs :: forall k (r1 :: k) (r2 :: k) . (Typeable k, Typeable r1, Typeable r2) => (P r1 -> P r2 -> B (Put r2 ':. Put r1 ':. 'None) Int) -> B 'None Int
+z, zs :: forall k (r1 :: k) (r2 :: k) . (Typeable k, Typeable r1, Typeable r2)
+    => (P r1 -> P r2 -> B (Put r2 ':. Put r1 ':. 'None) Int) -> B 'None Int
 z  = \f -> Sym Z :$ elam (\(r1 :: P r1) -> elam (\(r2 :: P r2) -> Spine (f r1 r2)))
 zs = smartSym' Z
 

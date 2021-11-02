@@ -138,9 +138,9 @@ maxEvEta (Spine b)    = maxEvBeta b
 
 -- | Get the highest evidence name bound for a 'Beta'.
 maxEvBeta :: Beta sym qs a -> Name
-maxEvBeta (beta :$ eta)  = maxEvBeta beta `Prelude.max` maxEvEta eta
-maxEvBeta (beta :# Ev n) = maxEvBeta beta `Prelude.max` n
-maxEvBeta _              = 0
+maxEvBeta (beta :$ eta) = maxEvBeta beta `Prelude.max` maxEvEta eta
+maxEvBeta (beta :# _)   = maxEvBeta beta
+maxEvBeta _             = 0
 
 -- | Interface for evidence binding.
 elam :: Typeable q => (Ev q -> Eta sym (q ':. qs) b) -> Eta sym qs (q ':=> b)
