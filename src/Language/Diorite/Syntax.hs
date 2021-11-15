@@ -141,6 +141,7 @@ maxEvBeta :: Beta sym qs a -> Name
 maxEvBeta (beta :$ eta) = maxEvBeta beta `Prelude.max` maxEvEta eta
 maxEvBeta (beta :# _)   = maxEvBeta beta
 maxEvBeta _             = 0
+-- todo: Think more about :#.
 
 -- | Interface for evidence binding.
 elam :: Typeable q => (Ev q -> Eta sym (q ':. qs) b) -> Eta sym qs (q ':=> b)
@@ -148,7 +149,7 @@ elam f = Ev v :\\ body
   where
     v    = maxEvEta body + 1
     body = f $ Ev v
--- todo: Loosen qual. constraints, "q:qs" => "Elem q qs".
+-- todo: Loosen qual. constraints (q:qs => Elem q qs).
 
 --------------------------------------------------------------------------------
 -- * "Smart" constructors.

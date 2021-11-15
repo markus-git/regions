@@ -18,7 +18,7 @@ import qualified Language.Diorite.Qualifiers.Witness as Q
 import qualified Language.Diorite.Traversal as T
 import qualified Language.Diorite.Decoration as D
 --import qualified Language.Diorite.Region.Labels as L
---import qualified Language.Diorite.Region.Labels.Witness as L
+import qualified Language.Diorite.Region.Labels.Witness as L
 
 import Data.Constraint (Dict(..), Constraint)
 import Data.Type.Equality ((:~:)(..))
@@ -74,14 +74,22 @@ data LArgs l sig where
 
 infixr :*, :~
 
+type E :: forall k . (k -> *) -> *
+data E f where
+    E :: f a -> E f
+  
 -- ...
 class Sym sym => Lbl sym where
     type Label sym :: * -> *
-    label :: sym sig -> LArgs (Label sym) sig -> Label sym (Result sig)
+    -- Tell me how to infer regions for symbol given its "arguments".
+    label :: sym sig -> L.N r -> LArgs (Label sym) sig -> Label sym (Result sig)
+    -- Tell me what regions are used in a label.
+    free :: Proxy sym -> Label sym a -> E (QualRep @Nat)
 
 instance Lbl sym => Lbl (sym :&: info) where
     type Label (sym :&: info) = Label sym
-    label = label . _sym
+    label s n ls = label (_sym s) n ls
+    free  s l  = free (Proxy @sym) l
 
 type L sym = (sym :+: Rgn) :&: (Label sym)
 
@@ -113,8 +121,7 @@ type (>=) :: forall p . Qualifier p -> Qualifier p -> Constraint
 class (Extends ps qs ~ 'True) => (>=) ps qs
 instance (Extends ps qs ~ 'True) => (>=) ps qs
 -- todo: Perhaps swap >= for <=, I read ((>=) qs) as "something larger than qs",
--- but the fully applied constraint "qs >= ps". The >= symbol can then be a bit
--- confusing as |qs| < |ps|.
+-- but the fully applied constraint "qs >= ps" can be a bit confusing.
 
 annotateBeta ::  forall (sym :: Symbol (Put Nat) *) ps rs qs sig a
     .  (Sym sym, a ~ Result sig, SmartApply ps rs ~ qs)
@@ -189,30 +196,44 @@ annotateArgs ((p :: Ev p) T.:~ (as :: Args sym ps b)) =
     (Rgn2 p as', p :~ ls)
 
 annotateSym :: forall (sym :: Symbol (Put Nat) *) qs rs a sig
-    .  ( Sym sym, Lbl sym, SmartApply 'None rs ~ qs
-       , a ~ Result sig)
+    .  (Sym sym, Lbl sym, SmartApply 'None rs ~ qs, a ~ Result sig)
     => sym sig
     -> Args sym rs sig
     -> (Beta2 (L sym) ((>=) qs) ('Const a), Label sym a)
 annotateSym sym as =
     let sig = symbol sym in
     let (as', ls) = annotateArgs as in
-    let l = label sym ls in
-    let b = B2 (Sym ((inj sym) :&: l)) Q.QualNone in
+    let l = label sym undefined ls in
+    let b = B2 (Sym (inj sym :&: l)) Q.QualNone in
     let b' = annotateBeta b as' Q.QualNone sig in
     (b', l)
+
+annotateVar :: forall (sym :: Symbol (Put Nat) *) ps qs rs a sig
+    .  (Sym sym, Lbl sym, SmartApply ps rs ~ qs, a ~ Result sig, Sig sig)
+    => Name
+    -> QualRep ps
+    -> Args sym rs sig
+    -> (Beta2 (L sym) ((>=) qs) ('Const a), Label sym a)
+annotateVar var ps as =
+    undefined
+
+inferRegion ::  forall (sym :: Symbol (Put Nat) *) qs a
+    .  ()
+    => (Beta2 (L sym) ((>=) qs) ('Const a), Label sym a)
+    -> (Beta2 (L sym) ((>=) qs) ('Const a), Label sym a)
+inferRegion (B2 b qs, l) = undefined
 
 annotateASTF :: forall (sym :: Symbol (Put Nat) *) qs a
     .  (Sym sym, Lbl sym)
     => ASTF sym qs a
     -> (Beta2 (L sym) ((>=) qs) ('Const a), Label sym a)
-annotateASTF ast = T.constMatch annotateSym (error "Var") ast
+annotateASTF = inferRegion . T.constMatch annotateSym annotateVar
 
--- annotate :: forall (sym :: Symbol (Put Nat) *) qs a
---     .  (Sym sym, Rgn :<: sym)
---     => ASTF sym qs a
---     -> Beta2 (sym :&: Ann) ((>=) qs) ('Const a)
--- annotate ast = undefined -- annotateASTF ...
+annotate :: forall (sym :: Symbol (Put Nat) *) qs a
+    .  (Sym sym, Lbl sym)
+    => ASTF sym qs a
+    -> Beta2 (L sym) ((>=) qs) ('Const a)
+annotate = fst . annotateASTF
 
 --------------------------------------------------------------------------------
 -- ...

@@ -11,7 +11,7 @@ import Language.Diorite.Syntax
 import Language.Diorite.Decoration
 import Language.Diorite.Interpretation
 import qualified Language.Diorite.Region.Annotation as A
-
+import qualified Language.Diorite.Region.Labels.Witness as AW
 import Data.Typeable
 import Data.Constraint (Constraint)
 
@@ -129,8 +129,8 @@ ex3 = share (num 2) (\x -> l_ (tup x (add x (neg x))))
 
 type LR :: * -> *
 data LR a where
-    LInt :: LR Int
-    LTup :: LR a -> LR b -> LR (a, b)
+    LInt :: AW.N r -> LR Int
+    LTup :: AW.N r -> LR a -> LR b -> LR (a, b)
 
 -- int : () -> Int^a
 -- neg : Int^a -> Int^b
@@ -139,19 +139,27 @@ data LR a where
 -- ...
 instance A.Lbl D where
     type Label D = LR
-    label (Num _) (A.Nil) = LInt
-    label (Neg) (_ A.:* A.Nil) = LInt
-    label (Add) (_ A.:* _ A.:* A.Nil) = LInt
-    label (Let) (_ A.:* _ A.:* A.Nil) = LInt
-    label (Tup) (a A.:* b A.:* A.Nil) = LTup a b
-    label (Fst) ((LTup a _) A.:* A.Nil) = a
-    label (Snd) ((LTup _ b) A.:* A.Nil) = b
+    
+    label (Num _) n (A.Nil) = LInt n
+    label (Neg) n (_ A.:* A.Nil) = LInt n
+    label (Add) n (_ A.:* _ A.:* A.Nil) = LInt n
+    label (Let) n (_ A.:* _ A.:* A.Nil) = LInt n
+    label (Tup) n (a A.:* b A.:* A.Nil) = LTup n a b
+    label (Fst) _ ((LTup _ a _) A.:* A.Nil) = a
+    label (Snd) _ ((LTup _ _ b) A.:* A.Nil) = b
+
+    free _ (LInt (n :: AW.NatRep r))
+      = A.E (AW.withKnownNat n (QualPred (Proxy @r) QualNone))
+    free p (LTup (n :: AW.NatRep r) a b)
+      | A.E aq <- A.free p a
+      , A.E bq <- A.free p b
+      = A.E (AW.withKnownNat n (QualPred (Proxy @r) (union aq bq)))
 
 type E :: * -> *
 type E a = A.Beta2 @(A.Put Nat) (((D :&: TR) :+: A.Rgn) :&: LR) ((A.>=) 'None) ('Const a)
 
 ann :: B Int -> E Int
-ann b = fst (A.annotateASTF b)
+ann = A.annotate
 
 pr :: E Int -> String
 pr (A.B2 b _) = show b

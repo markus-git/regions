@@ -34,9 +34,6 @@ instance (Render sym1, Render sym2) => Render (sym1 :+: sym2) where
     renderArgs args (InjL l) = renderArgs args l
     renderArgs args (InjR r) = renderArgs args r
 
--- instance Render Ev where
---     renderSym (Ev n) = show n
-
 instance Render (A.Const String) where
     renderSym = A.getConst
 
