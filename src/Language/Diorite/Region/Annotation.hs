@@ -10,6 +10,7 @@ import Language.Diorite.Syntax
 import Language.Diorite.Traversal (Arguments, Args, SmartApply)
 import Language.Diorite.Decoration ((:&:)(..))
 import Language.Diorite.Interpretation
+import Language.Diorite.Region.Labels (Put(..), Rgn(..))
 --import Language.Diorite.Region.Labels as L (Put(..), Label, Strip, Dress, LblRep, Place)
 --import Language.Diorite.Region.Labels.Witness (NatRep(..))
 import qualified Language.Diorite.Signatures as S
@@ -26,7 +27,7 @@ import Data.Typeable (Typeable)
 import Data.Proxy (Proxy(..))
 import Numeric.Natural (Natural)
 
-import GHC.TypeNats
+import GHC.TypeNats hiding (SomeNat)
 
 import Prelude hiding (succ)
 
@@ -46,36 +47,40 @@ import Prelude hiding (succ)
 --
 --------------------------------------------------------------------------------
 
--- ...
-type LArgs :: forall p . (* -> *) -> Signature p * -> *
-data LArgs l sig where
-    Nil  :: LArgs l ('Const a)
-    (:*) :: l (Result a) -> LArgs l sig -> LArgs l (a ':-> sig)
-    (:~) :: Ev p -> LArgs l sig -> LArgs l (p ':=> sig)
+-- type LArgs :: forall p . (* -> *) -> Signature p * -> *
+-- data LArgs l sig where
+--     Nil  :: LArgs l ('Const a)
+--     (:*) :: l (Result a) -> LArgs l sig -> LArgs l (a ':-> sig)
+--     (:~) :: Ev p -> LArgs l sig -> LArgs l (p ':=> sig)
 
-infixr :*, :~
+-- infixr :*, :~
 
-type E :: forall k . (k -> *) -> *
-data E f where
-    E :: f a -> E f
+-- type E :: forall k . (k -> *) -> *
+-- data E f where
+--     E :: f a -> E f
   
--- ...
-class Sym sym => Lbl sym where
-    type Label sym :: * -> *
-    -- Tell me how to infer regions for symbol given its "arguments".
-    label :: sym sig -> L.N r -> LArgs (Label sym) sig -> Label sym (Result sig)
-    -- Tell me what regions are used in a label.
-    free :: Proxy sym -> Label sym a -> E (QualRep @Nat)
+-- class Sym sym => Lbl sym where
+--     type Label sym :: * -> *
+--     -- Tell me how to infer regions for symbol given its "arguments".
+--     label :: sym sig -> L.N r -> LArgs (Label sym) sig -> Label sym (Result sig)
+--     -- Tell me what regions are used in a label.
+--     free :: Proxy sym -> Label sym a -> E (QualRep @Nat)
 
-instance Lbl sym => Lbl (sym :&: info) where
-    type Label (sym :&: info) = Label sym
-    label s n ls = label (_sym s) n ls
-    free  s l  = free (Proxy @sym) l
-
-type L sym = (sym :+: Rgn) :&: (Label sym)
+-- instance Lbl sym => Lbl (sym :&: info) where
+--     type Label (sym :&: info) = Label sym
+--     label s n ls = label (_sym s) n ls
+--     free  s l  = free (Proxy @sym) l
 
 --------------------------------------------------------------------------------
 -- ** ...
+
+type SomeNat :: *
+data SomeNat where
+    SomeNat :: KnownNat a => LW.NatRep a -> SomeNat
+
+data Label a = Label SomeNat
+
+type L sym = (sym :+: Rgn) :&: (Label)
 
 -- Beta w/ ex. qualifiers bound by a constraint.
 type Beta2 :: forall p . Symbol p * -> (Qualifier p -> Constraint) -> Signature p * -> *
@@ -95,11 +100,16 @@ data Args2 sym qs sig where
          -> QualRep ps
          -> Args2 sym qs sig
          -> Args2 sym ('T.Union ps qs) (a ':-> sig)
-    Rgn2 :: Ev p -> Args2 sym qs sig -> Args2 sym ('T.Insert p qs) (p ':=> sig)
+    Rgn2 :: Ev p
+         -> Args2 sym qs sig
+         -> Args2 sym ('T.Insert p qs) (p ':=> sig)
+
+--------------------------------------------------------------------------------
+-- ** ...
 
 -- Extends as a class so it can be partially applied.
 type (>=) :: forall p . Qualifier p -> Qualifier p -> Constraint
-class (Extends ps qs ~ 'True) => (>=) ps qs
+class    (Extends ps qs ~ 'True) => (>=) ps qs
 instance (Extends ps qs ~ 'True) => (>=) ps qs
 -- todo: Perhaps swap >= for <=, I read ((>=) qs) as "something larger than qs",
 -- but the fully applied constraint "qs >= ps" can be a bit confusing.
@@ -111,107 +121,100 @@ annotateBeta ::  forall (sym :: Symbol (Put Nat) *) ps rs qs sig a
     -> QualRep ps
     -> SigRep sig
     -> Beta2 (L sym) ((>=) qs) ('Const a)
-annotateBeta b Nil2 ps (S.SigConst)
+annotateBeta b Nil2 ps (S.SigConst) =
     -- By "Nil", know that "rs ~ 'T.Empty'" and thus "qs ~ ps".
-    = b
-annotateBeta (B2 b (ps' :: QualRep ps'))
-             (Arg2 (E2 e (l' :: QualRep l')) (l :: QualRep l) as) ps
-             (S.SigPart _ sig)
+    b
+annotateBeta (B2 b (ps' :: QualRep ps')) (Arg2 (E2 e (l' :: QualRep l')) (l :: QualRep l) as) ps (S.SigPart _ sig)
     -- By "Arg2", know that "rs ~ 'T.Union l r" and thus
     -- "qs ~ SmartApply (Union ps l) r".
     -- 1: "(ps' + l') >= (ps + l)" from rec. call.
     -- As "ps' >= ps" and "l' >= l", then "(ps' + l') >= (ps + l)".
-    | Refl :: Extends (Union ps l) (Union ps' l') :~: 'True
-        <- Q.witEUBoth ps ps' l l' Refl Refl
-    --
-    = annotateBeta (B2 (b :$ e) (Q.union ps' l')) as (Q.union ps l) sig
-annotateBeta (B2 b ps') (Rgn2 ev as) ps (S.SigPred p sig)
+    | Refl :: Extends (Union ps l) (Union ps' l') :~: 'True <- QW.witEUBoth ps ps' l l' Refl Refl =
+        annotateBeta (B2 (b :$ e) (Q.union ps' l')) as (Q.union ps l) sig
+annotateBeta (B2 b ps') (Rgn2 ev as) ps (S.SigPred p sig) =
     -- By "Rgn2", know that "rs ~ 'T.Insert p r" and thus
     -- "qs ~ SmartApply (p ':. ps) r".
-    = annotateBeta (B2 (b :# ev) (Q.cons p ps')) as (Q.cons p ps) sig
+    annotateBeta (B2 (b :# ev) (Q.cons p ps')) as (Q.cons p ps) sig
 
 annotateEta :: forall (sym :: Symbol (Put Nat) *) qs sig
-    .  (Sym sym, Lbl sym)
+    .  (Sym sym)
     => Eta sym qs sig
-    -> (Eta2 (L sym) ((>=) qs) sig, QualRep qs, Label sym (Result sig))
+    -> (Eta2 (L sym) ((>=) qs) sig, QualRep qs, Label (Result sig))
 annotateEta (Spine b)
     | qs :: QualRep qs <- Q.qualifier
     , (B2 b' qs', l) <- annotateASTF b -- (qs :: QualRep qs)
-    , Dict <- Q.witQual qs'
-    = (E2 (Spine b') qs', qs, l)
+    , Dict <- Q.witQual qs' =
+        (E2 (Spine b') qs', qs, l)
 annotateEta (v :\ e)
-    | (E2 e' qs', qs, l) <- annotateEta e
-    = (E2 (v :\ e') qs', qs, l)
+    | (E2 e' qs', qs, l) <- annotateEta e =
+        (E2 (v :\ e') qs', qs, l)
 annotateEta ((Ev p :: Ev p) :\\ (e :: Eta sym ps b))
     -- By ":\\", "qs ~ ps - p" but "(ps - p) + p ~/~ ps" because the order might
     -- change; we cannot recover the rep. of "ps" from "qs" and "p". Hence the
     -- need for "annotateEta @qs" to return a rep. of "qs".
-    | (E2 (e' :: Eta (L sym) ps' b) (ps' :: QualRep ps'), ps, l)
-        <- annotateEta e
+    | (E2 (e' :: Eta (L sym) ps' b) (ps' :: QualRep ps'), ps, l) <- annotateEta e
     -- By ":\\" and "E2", know that "p in ps", "qs ~ ps - p" and "ps' >= ps".
     -- 1: "p in ps'" from "p :\\ e'".
     --   As "ps' >= ps" and "p in ps", then "p in ps'".
-    , Refl :: Elem p ps' :~: 'True
-        <- Q.witExtIn (Proxy @p) ps ps' Refl Refl
+    , Refl :: Elem p ps' :~: 'True <- QW.witExtIn (Proxy @p) ps ps' Refl Refl
     -- 2: "(ps' - p) >= qs" from "E2 _ (ps' - p)".
     --   As "qs ~ ps - p", then "(ps' - p) >= qs ~ (ps' - p) >= (ps - p)".
     --   "(ps' - p) >= (ps - p)" is eq. to "ps' >= ps".
-    , Refl :: Extends (Remove p ps) (Remove p ps') :~: Extends ps ps'
-        <- Q.witExtShrink (Proxy @p) ps ps' Refl
-    --
-    = (E2 (Ev p :\\ e') (Q.remove (Proxy @p) ps'), Q.remove (Proxy @p) ps, l)
+    , Refl :: Extends (Remove p ps) (Remove p ps') :~: Extends ps ps' <- QW.witExtShrink (Proxy @p) ps ps' Refl =
+        (E2 (Ev p :\\ e') (Q.remove (Proxy @p) ps'), Q.remove (Proxy @p) ps, l)
 
 annotateArgs :: forall (sym :: Symbol (Put Nat) *) rs sig
-    .  (Sym sym, Lbl sym)
+    .  (Sym sym)
     => Args sym rs sig
-    -> (Args2 (L sym) rs sig, LArgs (Label sym) sig)
-annotateArgs (T.Nil) = (Nil2, Nil)
+    -> Args2 (L sym) rs sig
+annotateArgs (T.Nil) =
+    Nil2
 annotateArgs ((e :: Eta sym ps a) T.:* (as :: Args sym qs b)) =
     -- By "T.:*", know that "rs ~ 'T.Union ps qs".
     let (e', ps, l) = annotateEta e in
-    let (as', ls) = annotateArgs as in
-    (Arg2 e' ps as', l :* ls)
+    let as' = annotateArgs as in
+    (Arg2 e' ps as')
 annotateArgs ((p :: Ev p) T.:~ (as :: Args sym ps b)) =
     -- By "T.:~", know that "rs ~ 'T.Insert p ps".
-    let (as', ls) = annotateArgs as in
-    (Rgn2 p as', p :~ ls)
+    let as' = annotateArgs as in
+    Rgn2 p as'
 
 annotateSym :: forall (sym :: Symbol (Put Nat) *) qs rs a sig
-    .  (Sym sym, Lbl sym, SmartApply 'None rs ~ qs, a ~ Result sig)
+    .  (Sym sym, SmartApply 'None rs ~ qs, a ~ Result sig)
     => sym sig
     -> Args sym rs sig
-    -> (Beta2 (L sym) ((>=) qs) ('Const a), Label sym a)
+    -> (Beta2 (L sym) ((>=) qs) ('Const a), Label a)
 annotateSym sym as =
     let sig = symbol sym in
-    let (as', ls) = annotateArgs as in
-    let l = label sym undefined ls in
-    let b = B2 (Sym (inj sym :&: l)) Q.QualNone in
-    let b' = annotateBeta b as' Q.QualNone sig in
+    let as' = annotateArgs as in
+    let l   = Label undefined in
+    let b   = B2 (Sym (inj sym :&: l)) Q.QualNone in
+    let b'  = annotateBeta b as' Q.QualNone sig in
     (b', l)
 
 annotateVar :: forall (sym :: Symbol (Put Nat) *) ps qs rs a sig
-    .  (Sym sym, Lbl sym, SmartApply ps rs ~ qs, a ~ Result sig, Sig sig)
+    .  (Sym sym, SmartApply ps rs ~ qs, a ~ Result sig, Sig sig)
     => Name
     -> QualRep ps
     -> Args sym rs sig
-    -> (Beta2 (L sym) ((>=) qs) ('Const a), Label sym a)
+    -> (Beta2 (L sym) ((>=) qs) ('Const a), Label a)
 annotateVar var ps as =
     undefined
 
 inferRegion ::  forall (sym :: Symbol (Put Nat) *) qs a
     .  ()
-    => (Beta2 (L sym) ((>=) qs) ('Const a), Label sym a)
-    -> (Beta2 (L sym) ((>=) qs) ('Const a), Label sym a)
+    => (Beta2 (L sym) ((>=) qs) ('Const a), Label a)
+    -> (Beta2 (L sym) ((>=) qs) ('Const a), Label a)
 inferRegion (B2 b qs, l) = undefined
 
 annotateASTF :: forall (sym :: Symbol (Put Nat) *) qs a
-    .  (Sym sym, Lbl sym)
+    .  (Sym sym)
     => ASTF sym qs a
-    -> (Beta2 (L sym) ((>=) qs) ('Const a), Label sym a)
+    -> (Beta2 (L sym) ((>=) qs) ('Const a), Label a)
 annotateASTF = inferRegion . T.constMatch annotateSym annotateVar
 
 annotate :: forall (sym :: Symbol (Put Nat) *) qs a
-    .  (Sym sym, Lbl sym)
+    .  (Sym sym)
     => ASTF sym qs a
     -> Beta2 (L sym) ((>=) qs) ('Const a)
 annotate = fst . annotateASTF

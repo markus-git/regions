@@ -103,22 +103,8 @@ type family Strip sig where
     Strip (a ':-> b) = Strip a ':-> Strip b
     Strip ('Put r ':=> a) = Strip a
 
--- | ...
-type LSym :: Symbol (Put Nat) * -> Signature (Put Nat) * -> *
-data LSym sym sig where
-    LSym :: (Strip l ~ sig) => sym l -> SigRep l -> TypeRep sym (Result sig)
-        -> LSym sym sig
-
--- | ...
-type Free :: * -> *
-type family Free a
--- type instance Free _ = QualNone
-
--- | ...
-class Sym sym => Lbl sym where
-    type TypeRep sym :: * -> *
-    labelSym :: sym sig -> LSym sym sig
-    -- free :: TypeRep sym a -> Free a
+--------------------------------------------------------------------------------
+-- ** ...
 
 -- | Introduce a local binding for place 'p', associated with region 'r'.
 local :: forall (sym :: Symbol (Put Nat) *) qs r info a
