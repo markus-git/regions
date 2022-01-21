@@ -60,9 +60,7 @@ data SigRep sig where
     SigConst :: Typeable a => SigRep ('Const a)
     SigPart  :: SigRep a -> SigRep sig -> SigRep (a ':-> sig)
     SigPred  :: Typeable p => Proxy p -> SigRep sig -> SigRep (p ':=> sig)
--- note: My '*Rep' types are apparently called singletons?
--- note: These 'Typeable' constraints leak to users through 'Sig', annoying but
--- probably harmless.
+-- note: 'Typeable' leaks through 'Sig' which is annoying...
 
 -- | Valid symbol signatures.
 type  Sig :: forall p . Signature p * -> Constraint
@@ -112,6 +110,9 @@ testSig (SigPred (_ :: Proxy x) a1) (SigPred (_ :: Proxy y) a2)
     , Just Refl <- testSig a1 a2
     = Just Refl
 testSig _ _ = Nothing
+-- todo: I never use this function? If I could remove it I could maybe also get
+-- rid of the 'Typeable' constraint for 'SigConst' and in turn 'Sig', that would
+-- save the user from having to put 'Typeable' everywhere for symbols...
 
 -- | Any rep. of a symbol signature is a valid symbol signature.
 witSig :: SigRep a -> Dict (Sig a)

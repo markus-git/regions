@@ -14,11 +14,11 @@ import Language.Diorite.Interpretation
 --import Language.Diorite.Region.Labels.Witness (NatRep(..))
 import qualified Language.Diorite.Signatures as S
 import qualified Language.Diorite.Qualifiers as Q
-import qualified Language.Diorite.Qualifiers.Witness as Q
+import qualified Language.Diorite.Qualifiers.Witness as QW
 import qualified Language.Diorite.Traversal as T
 import qualified Language.Diorite.Decoration as D
---import qualified Language.Diorite.Region.Labels as L
-import qualified Language.Diorite.Region.Labels.Witness as L
+import qualified Language.Diorite.Region.Labels as L
+import qualified Language.Diorite.Region.Labels.Witness as LW
 
 import Data.Constraint (Dict(..), Constraint)
 import Data.Type.Equality ((:~:)(..))
@@ -32,38 +32,19 @@ import Prelude hiding (succ)
 
 --------------------------------------------------------------------------------
 -- * ...
+--
+-- General idea:
+--
+--   > num: Int
+--  => num: Put 1 => Int^1
+--
+--   > tup: a -> b -> (a, b)
+--  => tup: Put 1 => a ->^2 b ->^3 (a, b)^1
+--
+--   > fst: (a, b) -> a
+--  => fst: (a, b)^1 ->^2 a
+--
 --------------------------------------------------------------------------------
-
--- | Kind for 'Put' predicates, which assert that a region 'r' is allocated.
-data Put r = Put r
-
--- | Evidence that a region 'r' is allocated.
-type Place :: forall r . r -> *
-type Place r = Ev ('Put r)
-
--- | Term annotations for region labels.
-type Rgn :: forall p . Signature (Put p) * -> *
-data Rgn sig where
-    -- ^ ...
-    Local :: forall p (r :: p) a
-        .  (Typeable p, Typeable r, Typeable a)
-        => Rgn (('Put r 'S.:=> 'S.Const a) 'S.:-> 'S.Const a)
-    -- ^ ...
-    At :: forall p (r :: p) a sig
-        .  (Typeable p, Typeable r, Sig a, Sig sig)
-        => Rgn ('Put r 'S.:=> a 'S.:-> sig)
--- todo: 'Put r' kind here really limits the choice of qualifiers.
-
-instance Sym Rgn where
-    symbol (Local) = signature
-    symbol (At)    = signature
-
-instance Render Rgn where
-    renderSym (Local) = "Local"
-    renderSym (At)    = "At"
-
---------------------------------------------------------------------------------
--- ** ...
 
 -- ...
 type LArgs :: forall p . (* -> *) -> Signature p * -> *

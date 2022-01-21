@@ -2,8 +2,7 @@
 
 module Small where
 
-import Language.Diorite.Syntax
-import Language.Diorite.Interpretation
+import Language.Diorite
 --import Language.Diorite.Region
 
 import Data.List (partition)
@@ -16,10 +15,9 @@ import Control.Monad.State (State)
 import qualified Control.Monad.State as S (get, put, evalState)
 
 --------------------------------------------------------------------------------
--- * ...
+-- * Simple language without qualifiers.
 --------------------------------------------------------------------------------
 
--- | Source language.
 data Prim a where
     Int :: Int -> Prim ('Const Int)
     Add :: Prim ('Const Int ':-> 'Const Int ':-> 'Const Int)
@@ -35,15 +33,19 @@ instance Render Prim where
     renderSym (Add)   = "(+)"
     renderSym (Let)   = "let"
 
-int   = smartSym' . Int
-add   = smartSym' Add
+type Exp a = ASTF Prim 'None a
+
+int :: Int -> Exp Int
+int = smartSym' . Int
+
+add :: Exp Int -> Exp Int -> Exp Int
+add = smartSym' Add
+
+share :: Exp Int -> (Exp Int -> Exp Int) -> Exp Int
 share = smartSym' Let
 
---------------------------------------------------------------------------------
-
-data Rgn a where
-    
-
+example :: Exp Int
+example = share (int 2) (\x -> add x x)
 
 --------------------------------------------------------------------------------
 -- Fin.
