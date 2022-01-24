@@ -2,6 +2,7 @@
 
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE EmptyCase #-}
 
 module Language.Diorite.Region.Annotation where
 
@@ -150,23 +151,24 @@ annotateBeta ::  forall (sym :: Symbol (Put Nat) *) ps rs qs sig a
     => Beta2 (L sym) ((>=) ps) sig
     -> Args2 (L sym) ((>>) rs) sig
     -> QualRep ps
+    -> ArgRep rs
     -> SigRep sig
     -> Beta2 (L sym) ((>=) qs) ('Const a)
-annotateBeta = undefined
--- annotateBeta b Nil2 ps (S.SigConst) =
---     -- By "Nil", know that "rs ~ 'T.Empty'" and thus "qs ~ ps".
---     b
--- annotateBeta (B2 b (ps' :: QualRep ps')) (Arg2 (E2 e (l' :: QualRep l')) (l :: QualRep l) as) ps (S.SigPart _ sig)
---     -- By "Arg2", know that "rs ~ 'T.Union l r" and thus
---     -- "qs ~ SmartApply (Union ps l) r".
---     -- 1: "(ps' + l') >= (ps + l)" from rec. call.
---     -- As "ps' >= ps" and "l' >= l", then "(ps' + l') >= (ps + l)".
---     | Refl :: Extends (Union ps l) (Union ps' l') :~: 'True <- QW.witEUBoth ps ps' l l' Refl Refl =
---         annotateBeta (B2 (b :$ e) (Q.union ps' l')) as (Q.union ps l) sig
--- annotateBeta (B2 b ps') (Rgn2 ev as) ps (S.SigPred p sig) =
---     -- By "Rgn2", know that "rs ~ 'T.Insert p r" and thus
---     -- "qs ~ SmartApply (p ':. ps) r".
---     annotateBeta (B2 (b :# ev) (Q.cons p ps')) as (Q.cons p ps) sig
+annotateBeta b (A2 T.Nil _) ps (ArgEmpty) (S.SigConst) =
+    -- By "Nil", know that "rs ~ 'T.Empty'" and thus "qs ~ ps".
+    b
+annotateBeta (B2 b (ps' :: QualRep ps')) (A2 (e T.:* as) (ArgUnion (l' :: QualRep l') r')) ps (ArgUnion (l :: QualRep l) r) (S.SigPart a' sig')
+    -- By "ArgUnion", know that "rs ~ 'T.Union l r" and thus "qs ~ SmartApply (Union ps l) r"; "rs'" is similar.
+    -- 1: "(ps' + l') >= (ps + l)" from rec. call.
+    -- As "ps' >= ps" and "l' >= l", then "(ps' + l') >= (ps + l)".
+    | Refl :: Extends ps ps' :~: 'True <- Refl
+    , Refl :: Extends l l' :~: 'True <- witEAExt l r l' r' Refl
+    , Refl :: Extends (Union ps l) (Union ps' l') :~: 'True <- QW.witEUBoth ps ps' l l' Refl Refl =
+        annotateBeta (B2 (b :$ e) (Q.union ps' l')) (A2 as r') (Q.union ps l) r sig'
+annotateBeta (B2 b ps') (A2 (ev T.:~ as) (ArgInsert (l' :: Proxy l') r')) ps (ArgInsert (l :: Proxy l) r) (S.SigPred _ sig')
+    -- By "ArgInsert", know that "rs ~ 'T.Insert p r" and thus "qs ~ SmartApply (p ':. ps) r".
+    | Refl :: l :~: l' <- witEAEq l r l' r' Refl =
+        annotateBeta (B2 (b :# ev) (Q.cons l' ps')) (A2 as r') (Q.cons l' ps) r sig'
 
 annotateEta :: forall (sym :: Symbol (Put Nat) *) qs sig
     .  (Sym sym)
@@ -174,7 +176,7 @@ annotateEta :: forall (sym :: Symbol (Put Nat) *) qs sig
     -> (Eta2 (L sym) ((>=) qs) sig, QualRep qs)
 annotateEta (Spine b)
     | qs :: QualRep qs <- Q.qualifier
-    , (B2 b' qs') <- annotateASTF undefined b -- (qs :: QualRep qs)
+    , (B2 b' qs') <- annotateASTF undefined b
     , Dict <- Q.witQual qs' =
         (E2 (Spine b') qs', qs)
 annotateEta (v :\ e)
@@ -198,20 +200,21 @@ annotateEta ((Ev p :: Ev p) :\\ (e :: Eta sym ps b))
 annotateArgs :: forall (sym :: Symbol (Put Nat) *) rs sig
     .  (Sym sym)
     => Args sym rs sig
-    -> Args2 (L sym) ((>>) rs) sig
-annotateArgs (T.Nil) = A2 T.Nil ArgEmpty
+    -> (Args2 (L sym) ((>>) rs) sig, ArgRep rs)
+annotateArgs (T.Nil) =
+    (A2 T.Nil ArgEmpty, ArgEmpty)
 annotateArgs ((e :: Eta sym ps a) T.:* (as :: Args sym qs b)) =
     -- By "T.:*", know that "rs ~ 'T.Union ps qs".
     case annotateEta e of
         (E2 (e' :: Eta (L sym) ps' a) ps', ps) ->
             case annotateArgs as of
-                (A2 (as' :: Args (L sym) qs' b) qs') ->
-                    A2 (e' T.:* as') (ArgUnion ps' qs')
+                (A2 (as' :: Args (L sym) qs' b) qs', rs) ->
+                    (A2 (e' T.:* as') (ArgUnion ps' qs'), ArgUnion ps rs)
 annotateArgs ((Ev p :: Ev p) T.:~ (as :: Args sym ps b)) =
     -- By "T.:~", know that "rs ~ 'T.Insert p ps".
     case annotateArgs as of
-        (A2 (as' :: Args (L sym) qs' b) qs') ->
-            A2 (Ev p T.:~ as') (ArgInsert (Proxy @p) qs')
+        (A2 (as' :: Args (L sym) qs' b) qs', rs) ->
+            (A2 (Ev p T.:~ as') (ArgInsert (Proxy @p) qs'), ArgInsert (Proxy @p) rs)
 
 annotateSym :: forall (sym :: Symbol (Put Nat) *) qs rs a sig
     .  (Sym sym, SmartApply 'None rs ~ qs, a ~ Result sig)
@@ -221,11 +224,11 @@ annotateSym :: forall (sym :: Symbol (Put Nat) *) qs rs a sig
     -> Beta2 (L sym) ((>=) qs) ('Const a)
 annotateSym n sym as =
     let sig = symbol sym in
-    let as' = annotateArgs as in
+    let (as', rs) = annotateArgs as in
     -- let n' = LW.succ n in
     -- let l' = Label (SomeNat n') in
     let b = B2 (Sym (inj sym :&: undefined)) Q.QualNone in
-    let b' = annotateBeta b as' Q.QualNone sig in
+    let b' = annotateBeta b as' Q.QualNone rs sig in
     b'
 
 annotateVar :: forall (sym :: Symbol (Put Nat) *) ps qs rs a sig
@@ -556,9 +559,30 @@ annotate = annotateASTF (SomeNat LW.zero)
 --     ArgsEmpty  :: ArgsRep ('T.Empty)
 --     ArgsUnion  :: QualRep qs -> ArgsRep ps -> ArgsRep ('T.Union qs ps)
 --     ArgsInsert :: NatRep n -> ArgsRep qs -> ArgsRep ('T.Insert ('Put n) qs)
-    
+
 --------------------------------------------------------------------------------
 -- ** ...
+
+type A = ArgRep
+
+testExtends :: forall a b . QW.Q a -> QW.Q b -> Either (Extends a b :~: 'True) (Extends a b :~: 'False)
+testExtends (Q.QualNone) _       = Left Refl
+testExtends (Q.QualPred p ps) qs =
+    case Q.testElem p qs of
+        Left  Refl -> testExtends ps (Q.remove p qs)
+        Right Refl -> Right Refl
+
+witEAEq :: forall a b c d . (Typeable a, Typeable c) => QW.P a -> A b -> QW.P c -> A d -> ExtendsAll ('T.Insert a b) ('T.Insert c d) :~: 'True -> a :~: c
+witEAEq a _ c _ Refl =
+    case Q.testEq a c of
+        Left  Refl -> Refl
+        Right x    -> case x of {}
+
+witEAExt :: forall a b c d . QW.Q a -> A b -> QW.Q c -> A d -> ExtendsAll ('T.Union a b) ('T.Union c d) :~: 'True -> Extends a c :~: 'True
+witEAExt a _ c _ Refl =
+    case testExtends a c of
+        Left  Refl -> Refl
+        Right x    -> case x of {}
 
 -- witArgsElem :: forall a as bs . Typeable a => Proxy a -> QualRep as -> ArgsRep bs
 --     -> Elem a as :~: 'True
