@@ -45,24 +45,24 @@ module Language.Diorite.Region.Labels where
   --   , thmGTUnique
   --   ) where
 
-import Language.Diorite.Signatures (Signature(..), Sig(..), Result, SigRep)
-import Language.Diorite.Qualifiers (Qualifier(..), Qual(..), Remove, Elem, QualRep(..)) --, type (:/~:), type (==), If, Remove, Union, Elem, QualRep(..), Qual)
--- import Language.Diorite.Qualifiers.Witness
+import Language.Diorite.Signatures (Signature(..), Sig(..))
+import Language.Diorite.Qualifiers (Qualifier(..), Qual(..), Remove, Elem, QualRep(..), type (==), type (:/~:), If, Remove, Union) --, Elem, QualRep(..), Qual)
+import Language.Diorite.Qualifiers.Witness (Q, witElemRemove)
 import Language.Diorite.Syntax (Ev, Symbol, Beta(..), Eta(..), AST, ASTF, Sym(..), (:<:)(..))
 import Language.Diorite.Decoration ((:&:)(..))
 import Language.Diorite.Interpretation (Render(..))
--- import Language.Diorite.Region.Labels.Witness
+import Language.Diorite.Region.Labels.Witness
 -- import qualified Language.Diorite.Signatures as S (Signature(..))
 
 -- import Data.Constraint (Constraint)
 import Data.Typeable (Typeable)
--- import Data.Type.Equality (type (:~:)(..))
--- import Data.Proxy (Proxy(..))
--- import qualified Unsafe.Coerce as Unsafe (unsafeCoerce)
+import Data.Type.Equality (type (:~:)(..))
+import Data.Proxy (Proxy(..))
+import qualified Unsafe.Coerce as Unsafe (unsafeCoerce)
 
 import GHC.TypeNats
 
--- import Prelude hiding (succ)
+import Prelude hiding (succ)
 
 --------------------------------------------------------------------------------
 -- * ...
@@ -148,25 +148,35 @@ local p i ast = sym :$ (p :\\ Spine ast)
 --------------------------------------------------------------------------------
 -- ** ...
 
--- type QualNat :: Qualifier (Put Nat) -> *
--- data QualNat qs where
---   DictNone :: QualNat ('None)
---   DictPred :: NatRep r -> QualNat qs -> QualNat ('Put r ':. qs)
+witPutCong :: forall a b . a :~: b -> 'Put a :~: 'Put b
+witPutCong Refl = Refl
 
--- remove :: NatRep p -> QualNat qs -> QualNat (Remove ('Put p) qs)
--- remove _ (DictNone)      = DictNone
--- remove p (DictPred q qs) =
---     case testNat p q of
---         Left  Refl -> qs
---         Right Refl
---             | Refl <- putDiff p q Refl
---             -> DictPred q (remove p qs)
+witPutUnique :: forall a b . 'Put a :~: 'Put b -> a :~: b
+witPutUnique Refl = Refl
 
--- union :: QualNat ps -> QualNat qs -> QualNat (Union ps qs)
--- union (DictNone)      qs = qs
--- union (DictPred p ps) qs = DictPred p (union ps (remove p qs))
+witPutDiff :: forall a b . N a -> N b -> a :/~: b -> 'Put a :/~: 'Put b
+witPutDiff _ _ Refl = Unsafe.unsafeCoerce (Refl @('False))
+-- todo: remove coerce?
 
--- type D = QualNat
+type PutRep :: Qualifier (Put Nat) -> *
+data PutRep qs where
+  PutNone :: PutRep ('None)
+  PutPred :: NatRep r -> PutRep qs -> PutRep ('Put r ':. qs)
+
+type P = PutRep
+
+remove :: NatRep p -> PutRep qs -> PutRep (Remove ('Put p) qs)
+remove _ (PutNone)      = PutNone
+remove p (PutPred q qs) =
+    case testNat p q of
+        Left  Refl -> qs
+        Right Refl
+            | Refl <- witPutDiff p q Refl
+            -> PutPred q (remove p qs)
+
+union :: PutRep ps -> PutRep qs -> PutRep (Union ps qs)
+union (PutNone)      qs = qs
+union (PutPred p ps) qs = PutPred p (union ps (remove p qs))
 
 -- type Puts :: Qualifier (Put Nat) -> Constraint
 -- class Puts qs where
@@ -179,79 +189,67 @@ local p i ast = sym :$ (p :\\ Spine ast)
 --     puts = DictPred (Nat (natVal (Proxy @r))) puts
 
 --------------------------------------------------------------------------------
-
--- putCong :: forall a b . a :~: b -> 'Put a :~: 'Put b
--- putCong Refl = Refl
-
--- putUnique :: forall a b . 'Put a :~: 'Put b -> a :~: b
--- putUnique Refl = Refl
-
--- putDiff :: forall a b . N a -> N b -> a :/~: b -> 'Put a :/~: 'Put b
--- putDiff _ _ Refl = Unsafe.unsafeCoerce (Refl @('False))
--- -- todo: Could maybe git rid of this coerce...
-
---------------------------------------------------------------------------------
 -- ** ...
 
--- type Greatest :: Nat -> Qualifier (Put Nat) -> Bool
--- type family Greatest r qs where
---     Greatest _ ('None) = 'True
---     Greatest r ('Put q ':. qs) = If (CmpNat r q == 'GT) (Greatest r qs) 'False
+type Greatest :: Nat -> Qualifier (Put Nat) -> Bool
+type family Greatest r qs where
+    Greatest _ ('None) = 'True
+    Greatest r ('Put q ':. qs) = If (CmpNat r q == 'GT) (Greatest r qs) 'False
 
--- thmGT :: forall a b cs . N a -> N b -> Q cs
---     -> Greatest a ('Put b ':. cs) :~: 'True
---     -> CmpNat a b :~: 'GT
--- thmGT a b _ Refl = case compareNat a b of Gt -> Refl
+witGT :: forall a b cs . N a -> N b -> Q cs
+    -> Greatest a ('Put b ':. cs) :~: 'True
+    -> CmpNat a b :~: 'GT
+witGT a b _ Refl = case compareNat a b of Gt -> Refl
 
--- thmGTRem :: forall a b cs . N a -> N b -> Q cs
---     -> Greatest a ('Put b ':. cs) :~: 'True
---     -> Greatest a cs :~: 'True
--- thmGTRem a b _ Refl = case compareNat a b of Gt -> Refl
+witGTRem :: forall a b cs . N a -> N b -> Q cs
+    -> Greatest a ('Put b ':. cs) :~: 'True
+    -> Greatest a cs :~: 'True
+witGTRem a b _ Refl = case compareNat a b of Gt -> Refl
 
--- thmGTAny :: forall a b cs
---     .  N a -> N b -> Q cs -> D cs
---     -> Greatest a cs :~: 'True
---     -> Elem ('Put b) cs :~: 'True
---     -> CmpNat a b :~: 'GT
--- thmGTAny a b (QualPred c cs) (DictPred r ds) Refl Refl =
---     let bp :: Proxy ('Put b) = Proxy in
---     case compareNat b r of
---         Gt | Refl <- thmGTRem a r cs Refl
---            , Refl <- witCmpNEQ b r Refl
---            , Refl <- putDiff b r Refl
---            , Refl <- withKnownNat b $ witElemRemove bp c (QualPred c cs) Refl
---            -> thmGTAny a b cs ds Refl Refl
---         Eq | Refl <- witCmpEQ b r Refl
---            -> thmGT a r cs Refl
---         Lt | Refl <- thmGTRem a r cs Refl
---            , Refl <- witCmpNEQ b r Refl
---            , Refl <- putDiff b r Refl
---            , Refl <- withKnownNat b $ witElemRemove bp c (QualPred c cs) Refl
---            -> thmGTAny a b cs ds Refl Refl
+witGTAny :: forall a b cs
+    .  N a -> N b -> Q cs -> P cs
+    -> Greatest a cs :~: 'True
+    -> Elem ('Put b) cs :~: 'True
+    -> CmpNat a b :~: 'GT
+witGTAny a b (QualPred c cs) (PutPred r ds) Refl Refl =
+    let bp :: Proxy ('Put b) = Proxy in
+    case compareNat b r of
+        Gt | Refl <- witGTRem a r cs Refl
+           , Refl <- witCmpNEQ b r Refl
+           , Refl <- witPutDiff b r Refl
+           , Refl <- withKnownNat b $ witElemRemove bp c (QualPred c cs) Refl
+           -> witGTAny a b cs ds Refl Refl
+        Eq | Refl <- witCmpEQ b r Refl
+           -> witGT a r cs Refl
+        Lt | Refl <- witGTRem a r cs Refl
+           , Refl <- witCmpNEQ b r Refl
+           , Refl <- witPutDiff b r Refl
+           , Refl <- withKnownNat b $ witElemRemove bp c (QualPred c cs) Refl
+           -> witGTAny a b cs ds Refl Refl
 
--- thmGTSucc :: forall a b
---     .  N a -> Q b -> D b
---     -> Greatest a b :~: 'True
---     -> Greatest (Succ a) b :~: 'True
--- thmGTSucc _ (QualNone) _ _ = Refl
--- thmGTSucc a (QualPred _ bs) (DictPred r ds) Refl =
---     case compareNat a r of
---         Gt | Refl <- witSuccGT @a
---            , Refl <- witCmpTrans (succ a) a r Gt Refl Refl
---            , Refl <- thmGTSucc a bs ds Refl
---            -> Refl
+witGTSucc :: forall a b
+    .  N a -> Q b -> P b
+    -> Greatest a b :~: 'True
+    -> Greatest (Succ a) b :~: 'True
+witGTSucc _ (QualNone) _ _ = Refl
+witGTSucc a (QualPred _ bs) (PutPred r ds) Refl =
+    case compareNat a r of
+        Gt | Refl <- witSuccGT @a
+           , Refl <- witCmpTrans (succ a) a r Gt Refl Refl
+           , Refl <- witGTSucc a bs ds Refl
+           -> Refl
 
--- thmGTUnique :: forall a b
---   .  N a -> Q b -> D b
---   -> Greatest a b :~: 'True
---   -> Elem ('Put a) b :~: 'False
--- thmGTUnique _ (QualNone) _ _ = Refl
--- thmGTUnique a (QualPred _ bs) (DictPred r ds) Refl =
---     case compareNat a r of
---         Gt | Refl <- witCmpNEQ a r Refl
---            , Refl <- putDiff a r Refl
---            , Refl <- thmGTUnique a bs ds Refl
---            -> Refl
+witGTUnique :: forall a b
+  .  N a -> Q b -> P b
+  -> Greatest a b :~: 'True
+  -> Elem ('Put a) b :~: 'False
+witGTUnique _ (QualNone) _ _ = Refl
+witGTUnique a (QualPred _ bs) (PutPred r ds) Refl =
+    case compareNat a r of
+        Gt | Refl <- witCmpNEQ a r Refl
+           , Refl <- witPutDiff a r Refl
+           , Refl <- witGTUnique a bs ds Refl
+           -> Refl
 
 --------------------------------------------------------------------------------
 -- Fin.
