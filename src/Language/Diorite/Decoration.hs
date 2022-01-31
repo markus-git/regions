@@ -36,9 +36,6 @@ instance Sym sym => Sym (sym :&: info) where
 instance Project sub sup => Project sub (sup :&: info) where
     prj = prj . _sym
 
--- instance (sub :<: sup) => (sub :&: info) :<: (sup :&: info) where
---     inj (sub :&: info) = (inj sub) :&: info
-
 -- | Make a "smart" constructor for a symbol decorated with some information.
 smartSymDecor :: forall p (es :: Exists p) sup sub info (sig :: Signature p *) f
     .  ( Sig sig

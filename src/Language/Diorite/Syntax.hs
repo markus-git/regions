@@ -335,8 +335,9 @@ instance {-# OVERLAPS #-} (sym :<: sym) where
 instance {-# OVERLAPS #-} (sym1 :<: (sym1 :+: sym2)) where
     inj = InjL
 
-instance {-# OVERLAPS #-} (sym1 :<: sym3) => (sym1 :<: (sym2 :+: sym3)) where
+instance {-# OVERLAPPABLE #-} (sym1 :<: sym3) => (sym1 :<: (sym2 :+: sym3)) where
     inj = InjR . inj
+-- note: was OVERLAPPABLE
 
 --------------------------------------------------------------------------------
 

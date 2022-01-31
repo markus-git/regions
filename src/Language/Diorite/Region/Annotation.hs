@@ -34,52 +34,14 @@ import GHC.TypeNats hiding (SomeNat)
 import Prelude hiding (succ)
 
 --------------------------------------------------------------------------------
--- * ...
---
--- General idea:
---
---   > num: Int
---  => num: Put 1 => Int^1
---
---   > tup: a -> b -> (a, b)
---  => tup: Put 1 => a ->^2 b ->^3 (a, b)^1
---
---   > fst: (a, b) -> a
---  => fst: (a, b)^1 ->^2 a
---
---------------------------------------------------------------------------------
+-- ** ... constraints that I need ...
 
--- type LArgs :: forall p . (* -> *) -> Signature p * -> *
--- data LArgs l sig where
---     Nil  :: LArgs l ('Const a)
---     (:*) :: l (Result a) -> LArgs l sig -> LArgs l (a ':-> sig)
---     (:~) :: Ev p -> LArgs l sig -> LArgs l (p ':=> sig)
-
--- infixr :*, :~
-
--- type E :: forall k . (k -> *) -> *
--- data E f where
---     E :: f a -> E f
-  
--- class Sym sym => Lbl sym where
---     type Label sym :: * -> *
---     -- Tell me how to infer regions for symbol given its "arguments".
---     label :: sym sig -> L.N r -> LArgs (Label sym) sig -> Label sym (Result sig)
---     -- Tell me what regions are used in a label.
---     free :: Proxy sym -> Label sym a -> E (QualRep @Nat)
-
--- instance Lbl sym => Lbl (sym :&: info) where
---     type Label (sym :&: info) = Label sym
---     label s n ls = label (_sym s) n ls
---     free  s l  = free (Proxy @sym) l
-
---------------------------------------------------------------------------------
--- ** ...
-
--- Greatest as a class constraint so that it can be partially applied.
-type Unique :: Qualifier (Put Nat) -> Nat -> Constraint
-class (L.Greatest p qs ~ 'True) => Unique qs p
-instance (L.Greatest p qs ~ 'True) => Unique qs p
+type ArgRep :: forall p . Arguments p -> *
+data ArgRep rs where
+    ArgEmpty  :: ArgRep ('T.Empty)
+    ArgUnion  :: QualRep a -> ArgRep b -> ArgRep ('T.Union a b)
+    ArgInsert :: Typeable a => Proxy a -> ArgRep b -> ArgRep ('T.Insert a b)
+-- todo: Move this?
 
 -- Extends as a class constraint so that it can be partially applied.
 type (>=) :: forall p . Qualifier p -> Qualifier p -> Constraint
@@ -88,45 +50,17 @@ instance (Extends ps qs ~ 'True) => (>=) ps qs
 -- todo: Perhaps swap >= for <=, I read ((>=) qs) as "something larger than qs",
 -- but the fully applied constraint "qs >= ps" can be a bit confusing.
 
-type ExtendsAll :: forall p . Arguments p -> Arguments p -> Bool
-type family ExtendsAll as xs where
-    ExtendsAll ('T.Empty)       ('T.Empty)       = 'True
-    ExtendsAll ('T.Union as bs) ('T.Union xs ys) =
-        Q.If (Extends as xs) (ExtendsAll bs ys) 'False
-    ExtendsAll ('T.Insert a as) ('T.Insert x xs) =
-        Q.If (a Q.== x) (ExtendsAll as xs) 'False
+type ExtendsArg :: forall p . Arguments p -> Arguments p -> Bool
+type family ExtendsArg as xs where
+    ExtendsArg ('T.Empty)       ('T.Empty)       = 'True
+    ExtendsArg ('T.Union as bs) ('T.Union xs ys) = Q.If (Extends as xs) (ExtendsArg bs ys) 'False
+    ExtendsArg ('T.Insert a as) ('T.Insert x xs) = Q.If (a Q.== x) (ExtendsArg as xs) 'False
 
--- ExtendsAll as a class constraint so that it can be partially applied.
+-- ExtendsArg as a class constraint so that it can be partially applied.
 type (>>) :: Arguments (Put Nat) -> Arguments (Put Nat) -> Constraint
-class (ExtendsAll ps qs ~ 'True) => (>>) ps qs
-instance (ExtendsAll ps qs ~ 'True) => (>>) ps qs
+class (ExtendsArg ps qs ~ 'True) => (>>) ps qs
+instance (ExtendsArg ps qs ~ 'True) => (>>) ps qs
 -- todo: Same as (>=)
-
---------------------------------------------------------------------------------
--- ** ...
-
-type ArgRep :: forall p . Arguments p -> *
-data ArgRep rs where
-    ArgEmpty  :: ArgRep ('T.Empty)
-    ArgUnion  :: QualRep a -> ArgRep b -> ArgRep ('T.Union a b)
-    ArgInsert :: Typeable a => Proxy a -> ArgRep b -> ArgRep ('T.Insert a b)
-
---------------------------------------------------------------------------------
--- ** ...
-
--- Some nat bound by a constraint.
-type SomeNat :: (Nat -> Constraint) -> *
-data SomeNat c where
-    SomeNat :: (KnownNat a, c a) => LW.NatRep a -> SomeNat c
-
-type Empty :: forall k . k -> Constraint
-class Empty x
-instance Empty x
-
-type Label :: forall k . k -> *
-data Label a = Label (SomeNat Empty)
-
-type L sym = (sym :+: Rgn) :&: (Label)
 
 -- Beta w/ ex. qualifiers bound by a constraint.
 type Beta2 :: forall p . Symbol p * -> (Qualifier p -> Constraint) -> Signature p * -> *
@@ -142,6 +76,41 @@ data Eta2 sym c sig where
 type Args2 :: forall p . Symbol p * -> (Arguments p -> Constraint) -> Signature p * -> *
 data Args2 sym c sig where
     A2 :: (c rs) => Args sym rs sig -> ArgRep rs -> Args2 sym c sig
+
+--------------------------------------------------------------------------------
+-- ** ...
+
+-- Goal:
+--   > create fresh label
+--   > infer a label (possibly fresh) for some symbol given its arguments' labels.
+--   > determine what labels are free in a context.
+--   > ...
+--   => I must carry around a "name supply", user must specify what a label is,
+--      labels must contain "names" that I can compare with Typeable.
+
+-- class Sym sym => Lbl sym where
+--     type Label sym :: * -> *
+--     fresh :: ?name? -> ?
+--     label :: sym sig -> ?args? sig -> (Label sym (Result sig), ?subst?)
+--     free  :: ?qargs? qs -> Label sym a -> (?qargs? xs, ?quargs? ys, ?xs + ys ~ qs?)
+
+-- type Unique :: Qualifier (Put Nat) -> Nat -> Constraint
+-- class (L.Greatest p qs ~ 'True) => Unique qs p
+-- instance (L.Greatest p qs ~ 'True) => Unique qs p
+
+-- type SomeNat :: (Nat -> Constraint) -> *
+-- data SomeNat c where
+--     SomeNat :: (KnownNat a, c a) => LW.NatRep a -> SomeNat c
+
+-- type Empty :: forall k . k -> Constraint
+-- class Empty x
+-- instance Empty x
+
+type Label :: forall k . k -> *
+data Label a where
+    Label :: Name -> Label a
+
+type L sym = sym :+: (Rgn :&: Label)
 
 --------------------------------------------------------------------------------
 -- ** ...
@@ -176,7 +145,7 @@ annotateEta :: forall (sym :: Symbol (Put Nat) *) qs sig
     -> (Eta2 (L sym) ((>=) qs) sig, QualRep qs)
 annotateEta (Spine b)
     | qs :: QualRep qs <- Q.qualifier
-    , (B2 b' qs') <- annotateASTF undefined b
+    , (B2 b' qs') <- annotateASTF b
     , Dict <- Q.witQual qs' =
         (E2 (Spine b') qs', qs)
 annotateEta (v :\ e)
@@ -218,18 +187,17 @@ annotateArgs ((Ev p :: Ev p) T.:~ (as :: Args sym ps b)) =
 
 annotateSym :: forall (sym :: Symbol (Put Nat) *) qs rs a sig
     .  (Sym sym, SmartApply 'None rs ~ qs, a ~ Result sig)
-    => SomeNat (Unique qs)
-    -> sym sig
+    => sym sig
     -> Args sym rs sig
     -> Beta2 (L sym) ((>=) qs) ('Const a)
-annotateSym n sym as =
+annotateSym sym as =
     let sig = symbol sym in
     let (as', rs) = annotateArgs as in
-    -- let n' = LW.succ n in
-    -- let l' = Label (SomeNat n') in
-    let b = B2 (Sym (inj sym :&: undefined)) Q.QualNone in
-    let b' = annotateBeta b as' Q.QualNone rs sig in
-    b'
+    let b = B2 (inj sym) Q.QualNone in
+    case annotateBeta b as' Q.QualNone rs sig of
+        (B2 b' qs') ->
+            --let b'' = L.atBeta b' (Label undefined) (Ev undefined) in
+            B2 b' qs'
 
 annotateVar :: forall (sym :: Symbol (Put Nat) *) ps qs rs a sig
     .  (Sym sym, SmartApply ps rs ~ qs, a ~ Result sig, Sig sig)
@@ -242,17 +210,16 @@ annotateVar var ps as =
 
 annotateASTF :: forall (sym :: Symbol (Put Nat) *) qs a
     .  (Sym sym)
-    => SomeNat (Unique qs)
-    -> ASTF sym qs a
+    => ASTF sym qs a
     -> Beta2 (L sym) ((>=) qs) ('Const a)
-annotateASTF n =
-    T.constMatch (annotateSym n) annotateVar
+annotateASTF =
+    T.constMatch annotateSym annotateVar
 
 annotate :: forall (sym :: Symbol (Put Nat) *) a
     .  (Sym sym)
     => ASTF sym 'None a
     -> Beta2 (L sym) ((>=) 'None) ('Const a)
-annotate = annotateASTF (SomeNat LW.zero)
+annotate = annotateASTF
 -- todo: Swap None for qs and thus zero with n s.t. n > q for all q in qs
 
 --------------------------------------------------------------------------------
@@ -572,13 +539,13 @@ testExtends (Q.QualPred p ps) qs =
         Left  Refl -> testExtends ps (Q.remove p qs)
         Right Refl -> Right Refl
 
-witEAEq :: forall a b c d . (Typeable a, Typeable c) => QW.P a -> A b -> QW.P c -> A d -> ExtendsAll ('T.Insert a b) ('T.Insert c d) :~: 'True -> a :~: c
+witEAEq :: forall a b c d . (Typeable a, Typeable c) => QW.P a -> A b -> QW.P c -> A d -> ExtendsArg ('T.Insert a b) ('T.Insert c d) :~: 'True -> a :~: c
 witEAEq a _ c _ Refl =
     case Q.testEq a c of
         Left  Refl -> Refl
         Right x    -> case x of {}
 
-witEAExt :: forall a b c d . QW.Q a -> A b -> QW.Q c -> A d -> ExtendsAll ('T.Union a b) ('T.Union c d) :~: 'True -> Extends a c :~: 'True
+witEAExt :: forall a b c d . QW.Q a -> A b -> QW.Q c -> A d -> ExtendsArg ('T.Union a b) ('T.Union c d) :~: 'True -> Extends a c :~: 'True
 witEAExt a _ c _ Refl =
     case testExtends a c of
         Left  Refl -> Refl
