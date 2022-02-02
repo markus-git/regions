@@ -8,6 +8,7 @@ module Language.Diorite.Region.Annotation where
 
 import Language.Diorite.Signatures (Signature(..), Result, SigRep, Sig, signature)
 import Language.Diorite.Qualifiers (Qualifier(..), Elem, Remove, Union, Extends, QualRep)
+import Language.Diorite.Qualifiers.Witness (P, Q)
 import Language.Diorite.Syntax (Name, Ev(..), Symbol, Beta(..), Eta(..), AST, ASTF, Sym(..), (:+:)(..), inj)
 import Language.Diorite.Traversal (Arguments, Args, SmartApply)
 import Language.Diorite.Decoration ((:&:)(..))
@@ -45,7 +46,7 @@ data ArgRep rs where
 
 -- Extends as a class constraint so that it can be partially applied.
 type (>=) :: forall p . Qualifier p -> Qualifier p -> Constraint
-class (Extends ps qs ~ 'True) => (>=) ps qs
+class    (Extends ps qs ~ 'True) => (>=) ps qs
 instance (Extends ps qs ~ 'True) => (>=) ps qs
 -- todo: Perhaps swap >= for <=, I read ((>=) qs) as "something larger than qs",
 -- but the fully applied constraint "qs >= ps" can be a bit confusing.
@@ -58,9 +59,36 @@ type family ExtendsArg as xs where
 
 -- ExtendsArg as a class constraint so that it can be partially applied.
 type (>>) :: Arguments (Put Nat) -> Arguments (Put Nat) -> Constraint
-class (ExtendsArg ps qs ~ 'True) => (>>) ps qs
+class    (ExtendsArg ps qs ~ 'True) => (>>) ps qs
 instance (ExtendsArg ps qs ~ 'True) => (>>) ps qs
 -- todo: Same as (>=)
+
+--------------------------------------------------------------------------------
+
+type Fresh :: Qualifier (Put Nat) -> Nat -> Constraint
+class    (L.Greatest p qs ~ 'True) => Fresh qs p
+instance (L.Greatest p qs ~ 'True) => Fresh qs p
+
+type GreatestArg :: Nat -> Arguments (Put Nat) -> Bool
+type family GreatestArg p as where
+    GreatestArg _ ('T.Empty)              = 'True
+    GreatestArg p ('T.Union qs as)        = Q.If (L.Greatest p qs) (GreatestArg p as) 'False
+    GreatestArg p ('T.Insert ('Put q) as) = Q.If (CmpNat p q Q.== 'GT) (GreatestArg p as) 'False
+
+type FreshAll :: Arguments (Put Nat) -> Nat -> Constraint
+class    (GreatestArg p as ~ 'True) => FreshAll as p
+instance (GreatestArg p as ~ 'True) => FreshAll as p
+
+type Nat2 :: (Nat -> Constraint) -> *
+data Nat2 c where
+    Nat2 :: (KnownNat a, c a) => LW.NatRep a -> Nat2 c
+
+-- type Empty :: forall k . k -> Constraint
+-- class    Empty x
+-- instance Empty x
+
+--------------------------------------------------------------------------------
+-- ...
 
 -- Beta w/ ex. qualifiers bound by a constraint.
 type Beta2 :: forall p . Symbol p * -> (Qualifier p -> Constraint) -> Signature p * -> *
@@ -76,35 +104,6 @@ data Eta2 sym c sig where
 type Args2 :: forall p . Symbol p * -> (Arguments p -> Constraint) -> Signature p * -> *
 data Args2 sym c sig where
     A2 :: (c rs) => Args sym rs sig -> ArgRep rs -> Args2 sym c sig
-
---------------------------------------------------------------------------------
--- ** ...
-
--- Goal:
---   > create fresh label
---   > infer a label (possibly fresh) for some symbol given its arguments' labels.
---   > determine what labels are free in a context.
---   > ...
---   => I must carry around a "name supply", user must specify what a label is,
---      labels must contain "names" that I can compare with Typeable.
-
--- class Sym sym => Lbl sym where
---     type Label sym :: * -> *
---     fresh :: ?name? -> ?
---     label :: sym sig -> ?args? sig -> (Label sym (Result sig), ?subst?)
---     free  :: ?qargs? qs -> Label sym a -> (?qargs? xs, ?quargs? ys, ?xs + ys ~ qs?)
-
--- type Unique :: Qualifier (Put Nat) -> Nat -> Constraint
--- class (L.Greatest p qs ~ 'True) => Unique qs p
--- instance (L.Greatest p qs ~ 'True) => Unique qs p
-
--- type SomeNat :: (Nat -> Constraint) -> *
--- data SomeNat c where
---     SomeNat :: (KnownNat a, c a) => LW.NatRep a -> SomeNat c
-
--- type Empty :: forall k . k -> Constraint
--- class Empty x
--- instance Empty x
 
 type Label :: forall k . k -> *
 data Label a where
@@ -145,7 +144,7 @@ annotateEta :: forall (sym :: Symbol (Put Nat) *) qs sig
     -> (Eta2 (L sym) ((>=) qs) sig, QualRep qs)
 annotateEta (Spine b)
     | qs :: QualRep qs <- Q.qualifier
-    , (B2 b' qs') <- annotateASTF b
+    , (B2 b' qs') <- annotateASTF b undefined
     , Dict <- Q.witQual qs' =
         (E2 (Spine b') qs', qs)
 annotateEta (v :\ e)
@@ -169,19 +168,20 @@ annotateEta ((Ev p :: Ev p) :\\ (e :: Eta sym ps b))
 annotateArgs :: forall (sym :: Symbol (Put Nat) *) rs sig
     .  (Sym sym)
     => Args sym rs sig
+    -> Nat2 (FreshAll rs)
     -> (Args2 (L sym) ((>>) rs) sig, ArgRep rs)
-annotateArgs (T.Nil) =
+annotateArgs (T.Nil) n =
     (A2 T.Nil ArgEmpty, ArgEmpty)
-annotateArgs ((e :: Eta sym ps a) T.:* (as :: Args sym qs b)) =
+annotateArgs ((e :: Eta sym ps a) T.:* (as :: Args sym qs b)) n =
     -- By "T.:*", know that "rs ~ 'T.Union ps qs".
     case annotateEta e of
         (E2 (e' :: Eta (L sym) ps' a) ps', ps) ->
-            case annotateArgs as of
+            case annotateArgs as undefined of
                 (A2 (as' :: Args (L sym) qs' b) qs', rs) ->
                     (A2 (e' T.:* as') (ArgUnion ps' qs'), ArgUnion ps rs)
-annotateArgs ((Ev p :: Ev p) T.:~ (as :: Args sym ps b)) =
+annotateArgs ((Ev p :: Ev p) T.:~ (as :: Args sym ps b)) n =
     -- By "T.:~", know that "rs ~ 'T.Insert p ps".
-    case annotateArgs as of
+    case annotateArgs as undefined of
         (A2 (as' :: Args (L sym) qs' b) qs', rs) ->
             (A2 (Ev p T.:~ as') (ArgInsert (Proxy @p) qs'), ArgInsert (Proxy @p) rs)
 
@@ -189,10 +189,11 @@ annotateSym :: forall (sym :: Symbol (Put Nat) *) qs rs a sig
     .  (Sym sym, SmartApply 'None rs ~ qs, a ~ Result sig)
     => sym sig
     -> Args sym rs sig
+    -> Nat2 (Fresh qs)
     -> Beta2 (L sym) ((>=) qs) ('Const a)
-annotateSym sym as =
+annotateSym sym as n =
     let sig = symbol sym in
-    let (as', rs) = annotateArgs as in
+    let (as', rs) = annotateArgs as undefined in
     let b = B2 (inj sym) Q.QualNone in
     case annotateBeta b as' Q.QualNone rs sig of
         (B2 b' qs') ->
@@ -211,16 +212,74 @@ annotateVar var ps as =
 annotateASTF :: forall (sym :: Symbol (Put Nat) *) qs a
     .  (Sym sym)
     => ASTF sym qs a
+    -> Nat2 (Fresh qs)
     -> Beta2 (L sym) ((>=) qs) ('Const a)
-annotateASTF =
-    T.constMatch annotateSym annotateVar
+annotateASTF ast n =
+    T.constMatch (\s as -> annotateSym s as n) annotateVar ast
 
 annotate :: forall (sym :: Symbol (Put Nat) *) a
     .  (Sym sym)
     => ASTF sym 'None a
     -> Beta2 (L sym) ((>=) 'None) ('Const a)
-annotate = annotateASTF
+annotate ast = annotateASTF ast (Nat2 LW.zero)
 -- todo: Swap None for qs and thus zero with n s.t. n > q for all q in qs
+
+--------------------------------------------------------------------------------
+-- ** ...
+
+type A = ArgRep
+
+testExtends :: forall a b . QW.Q a -> QW.Q b -> Either (Extends a b :~: 'True) (Extends a b :~: 'False)
+testExtends (Q.QualNone)      _  = Left Refl
+testExtends (Q.QualPred p ps) qs =
+    case Q.testElem p qs of
+        Left  Refl -> testExtends ps (Q.remove p qs)
+        Right Refl -> Right Refl
+
+witEAEq :: forall a b c d . (Typeable a, Typeable c) => QW.P a -> A b -> QW.P c -> A d -> ExtendsArg ('T.Insert a b) ('T.Insert c d) :~: 'True -> a :~: c
+witEAEq a _ c _ Refl =
+    case Q.testEq a c of
+        Left  Refl -> Refl
+        Right x    -> case x of {}
+
+witEAExt :: forall a b c d . QW.Q a -> A b -> QW.Q c -> A d -> ExtendsArg ('T.Union a b) ('T.Union c d) :~: 'True -> Extends a c :~: 'True
+witEAExt a _ c _ Refl =
+    case testExtends a c of
+        Left  Refl -> Refl
+        Right x    -> case x of {}
+
+--------------------------------------------------------------------------------
+
+witGr :: forall a b c . P a -> P b -> Q c -> L.Greatest a (b ':. c) :~: 'True -> L.Greatest a c :~: 'True
+witGr _ _ (Q.QualNone) _ = Refl
+witGr a b (Q.QualPred (p :: P p) (ps :: Q ps)) Refl
+    | Refl :: p :~: Proxy ('Put q) <- Refl
+    = undefined
+
+witGu :: forall a b c . P a -> Q b -> Q c -> L.Greatest a (Union b c) :~: 'True -> L.Greatest a b :~: 'True
+witGu _ (Q.QualNone) _ _ = Refl
+witGu a (Q.QualPred (p :: P p) (ps :: Q ps)) c Refl
+    = undefined
+    -- , Refl :: CmpNat a p' Q.== 'GT :~: 'True <- undefined -- todo: unpack p
+    -- , Refl :: L.Greatest a (p ':. (Union ps (Remove p c))) :~: L.Greatest a (Union ps (Remove p c)) <- undefined -- todo: given by above
+    -- , Refl :: L.Greatest a (p ':. ps) :~: L.Greatest a ps <- undefined -- todo: given by above
+    -- , Refl :: L.Greatest a ps :~: 'True <- witGu a ps (Q.remove p c) Refl
+    -- = undefined :: L.Greatest a ps :~: 'True
+
+witGtu :: forall a b c d . P a -> Q b -> Q c -> A d -> L.Greatest a (SmartApply (Union b c) d) :~: 'True -> L.Greatest a (SmartApply b d) :~: 'True
+witGtu a b c (ArgEmpty) Refl | Refl <- witGu a b c Refl = Refl
+witGtu a b c (ArgUnion (p :: Q p) (ps :: A ps)) Refl = undefined :: L.Greatest a (SmartApply (Union b p) ps) :~: 'True
+
+witGta :: forall a b c . QW.P a -> QW.Q b -> A c -> L.Greatest a (SmartApply b c) :~: 'True -> GreatestArg a c :~: 'True
+witGta _ _ (ArgEmpty)      _    = Refl
+witGta (a :: QW.P a) (b :: QW.Q b) (ArgUnion (c :: QW.Q x) (cs :: A xs)) Refl
+    | Refl :: L.Greatest a x :~: 'True <- undefined
+    --
+    , Refl :: L.Greatest a (SmartApply (Union b x) xs) :~: 'True <- Refl
+    , Refl :: L.Greatest a (SmartApply b xs) :~: 'True <- undefined
+    , Refl :: GreatestArg a xs :~: 'True <- witGta a b cs Refl =
+        Refl
+    -- Q.If (L.Greatest a a1) (GreatestArg a b1) 'False ~ 'True
 
 --------------------------------------------------------------------------------
 -- ...
@@ -518,38 +577,6 @@ annotate = annotateASTF
 -- annotateASTF n qs qsd = T.constMatch (annotateSym n qs qsd) undefined
 
 --------------------------------------------------------------------------------
--- * ...
---------------------------------------------------------------------------------
-
--- type ArgsRep :: T.Arguments (Put Nat) -> *
--- data ArgsRep qs where
---     ArgsEmpty  :: ArgsRep ('T.Empty)
---     ArgsUnion  :: QualRep qs -> ArgsRep ps -> ArgsRep ('T.Union qs ps)
---     ArgsInsert :: NatRep n -> ArgsRep qs -> ArgsRep ('T.Insert ('Put n) qs)
-
---------------------------------------------------------------------------------
--- ** ...
-
-type A = ArgRep
-
-testExtends :: forall a b . QW.Q a -> QW.Q b -> Either (Extends a b :~: 'True) (Extends a b :~: 'False)
-testExtends (Q.QualNone) _       = Left Refl
-testExtends (Q.QualPred p ps) qs =
-    case Q.testElem p qs of
-        Left  Refl -> testExtends ps (Q.remove p qs)
-        Right Refl -> Right Refl
-
-witEAEq :: forall a b c d . (Typeable a, Typeable c) => QW.P a -> A b -> QW.P c -> A d -> ExtendsArg ('T.Insert a b) ('T.Insert c d) :~: 'True -> a :~: c
-witEAEq a _ c _ Refl =
-    case Q.testEq a c of
-        Left  Refl -> Refl
-        Right x    -> case x of {}
-
-witEAExt :: forall a b c d . QW.Q a -> A b -> QW.Q c -> A d -> ExtendsArg ('T.Union a b) ('T.Union c d) :~: 'True -> Extends a c :~: 'True
-witEAExt a _ c _ Refl =
-    case testExtends a c of
-        Left  Refl -> Refl
-        Right x    -> case x of {}
 
 -- witArgsElem :: forall a as bs . Typeable a => Proxy a -> QualRep as -> ArgsRep bs
 --     -> Elem a as :~: 'True

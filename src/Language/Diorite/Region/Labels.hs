@@ -196,21 +196,13 @@ type family Greatest r qs where
     Greatest _ ('None) = 'True
     Greatest r ('Put q ':. qs) = If (CmpNat r q == 'GT) (Greatest r qs) 'False
 
-witGT :: forall a b cs . N a -> N b -> Q cs
-    -> Greatest a ('Put b ':. cs) :~: 'True
-    -> CmpNat a b :~: 'GT
+witGT :: forall a b cs . N a -> N b -> Q cs -> Greatest a ('Put b ':. cs) :~: 'True -> CmpNat a b :~: 'GT
 witGT a b _ Refl = case compareNat a b of Gt -> Refl
 
-witGTRem :: forall a b cs . N a -> N b -> Q cs
-    -> Greatest a ('Put b ':. cs) :~: 'True
-    -> Greatest a cs :~: 'True
+witGTRem :: forall a b cs . N a -> N b -> Q cs -> Greatest a ('Put b ':. cs) :~: 'True -> Greatest a cs :~: 'True
 witGTRem a b _ Refl = case compareNat a b of Gt -> Refl
 
-witGTAny :: forall a b cs
-    .  N a -> N b -> Q cs -> P cs
-    -> Greatest a cs :~: 'True
-    -> Elem ('Put b) cs :~: 'True
-    -> CmpNat a b :~: 'GT
+witGTAny :: forall a b cs . N a -> N b -> Q cs -> P cs -> Greatest a cs :~: 'True -> Elem ('Put b) cs :~: 'True -> CmpNat a b :~: 'GT
 witGTAny a b (QualPred c cs) (PutPred r ds) Refl Refl =
     let bp :: Proxy ('Put b) = Proxy in
     case compareNat b r of
@@ -227,10 +219,7 @@ witGTAny a b (QualPred c cs) (PutPred r ds) Refl Refl =
            , Refl <- withKnownNat b $ witElemRemove bp c (QualPred c cs) Refl
            -> witGTAny a b cs ds Refl Refl
 
-witGTSucc :: forall a b
-    .  N a -> Q b -> P b
-    -> Greatest a b :~: 'True
-    -> Greatest (Succ a) b :~: 'True
+witGTSucc :: forall a b . N a -> Q b -> P b -> Greatest a b :~: 'True -> Greatest (Succ a) b :~: 'True
 witGTSucc _ (QualNone) _ _ = Refl
 witGTSucc a (QualPred _ bs) (PutPred r ds) Refl =
     case compareNat a r of
@@ -239,10 +228,7 @@ witGTSucc a (QualPred _ bs) (PutPred r ds) Refl =
            , Refl <- witGTSucc a bs ds Refl
            -> Refl
 
-witGTUnique :: forall a b
-  .  N a -> Q b -> P b
-  -> Greatest a b :~: 'True
-  -> Elem ('Put a) b :~: 'False
+witGTUnique :: forall a b . N a -> Q b -> P b -> Greatest a b :~: 'True -> Elem ('Put a) b :~: 'False
 witGTUnique _ (QualNone) _ _ = Refl
 witGTUnique a (QualPred _ bs) (PutPred r ds) Refl =
     case compareNat a r of
